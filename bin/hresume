@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Resume work in a fresh session from a handoff document.
+#   hresume [claude|codex] [handoff-file]
+# With no file, picks the newest handoff for the current project folder.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DATA_DIR="${HANDOFF_BATON_DATA:-$REPO_ROOT}"
+TOOL="${1:-claude}"
+FILE="${2:-}"
+PROJECT="$(basename "$PWD")"
+
+if [[ -z "$FILE" ]]; then
+  FILE="$(ls -t "$DATA_DIR/handoffs/$PROJECT/"*.md 2>/dev/null | head -n1 || true)"
+fi
+
+if [[ -z "$FILE" || ! -f "$FILE" ]]; then
+  echo "hresume: no handoff file found for project '$PROJECT'." >&2
+  echo "         pass one explicitly: hresume $TOOL <path-to-handoff.md>" >&2
+  exit 1
+fi
+
+PROMPT="Resuming from a handoff document. Read it and continue the work it describes.
+
+$(cat "$FILE")"
+
+case "$TOOL" in
+  claude) exec claude "$PROMPT" ;;
+  codex)  exec codex "$PROMPT" ;;
+  *) echo "hresume: unknown tool '$TOOL' (use 'claude' or 'codex')" >&2; exit 1 ;;
+esac

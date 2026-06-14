@@ -1,0 +1,7 @@
+# Runtime data — kept locally for history/audit, never committed.
+/state/
+/handoffs/
+
+# Python
+__pycache__/
+*.pyc

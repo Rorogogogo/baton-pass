@@ -1,0 +1,60 @@
+---
+name: handoff-baton
+description: Watch conversation context size and, when it crosses a threshold, hand the session off to a fresh one via a saved handoff document. Generates the handoff doc and manages per-session thresholds.
+argument-hint: "[focus for the next session]"
+---
+
+# handoff-baton
+
+A relay baton for long conversations: when the context grows large, write a
+handoff document so a fresh session (`claude` or `codex`) can pick up the work
+with a small, cheap context — instead of paying to re-send a huge transcript
+every turn.
+
+## When you are invoked
+
+There are two paths:
+
+- **Automatically**, by the `handoff-baton` Stop hook, when context crosses the
+  threshold. The hook injects the current token count, the `session_id`, the
+  target handoff directory, and the exact `hb-state` commands to run. Present the
+  options menu below.
+- **Manually**, when the user runs the skill themselves. Skip the menu and
+  generate a handoff document immediately. If the user passed an argument, treat
+  it as the focus for the next session.
+
+## Options menu (hook-triggered only)
+
+Ask the user to choose, then act on their choice. **Never choose for them.**
+
+1. **Handoff now** — Write the handoff document (see below), then tell the user
+   to resume with `hresume claude` (or `hresume codex`).
+2. **Extend +10K** — Run the `hb-state extend <session_id> <value>` command the
+   hook provided, then continue the user's current work.
+3. **Disable for this conversation** — Run the `hb-state disable <session_id>`
+   command the hook provided, then continue.
+4. **Skip** — Do nothing; the hook will ask again on the next turn. Just
+   continue the work.
+
+## Writing the handoff document
+
+Save to the directory the hook provided:
+`<data>/handoffs/<project>/handoff-<YYYYMMDD-HHMM>.md`. When invoked manually,
+use this repo's `handoffs/<project>/` folder with the current timestamp.
+
+Include:
+
+- **Goal / current focus** — what we're trying to achieve. If the user gave an
+  argument, tailor the doc toward that next focus.
+- **State** — what's done, what's in progress, what's next.
+- **Key decisions & constraints** — non-obvious choices and the reasoning.
+- **Open questions / blockers.**
+- **Pointers** — reference PRDs, plans, ADRs, issues, commits, diffs, and key
+  files by path or URL. Do **not** duplicate their content.
+- **Suggested skills** — skills the next session should invoke.
+
+Rules:
+
+- **Redact secrets** — API keys, passwords, tokens, PII.
+- **Be concise.** The whole point is a small starting context. Link, don't paste.
+- After writing, print the file path and the resume command.
