@@ -4,7 +4,14 @@
 # With no file, picks the newest handoff for the current project folder.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve our real location even when invoked via a symlink (e.g. ~/.local/bin).
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do
+  _dir="$(cd -P "$(dirname "$_src")" && pwd)"
+  _src="$(readlink "$_src")"
+  [ "${_src#/}" = "$_src" ] && _src="$_dir/$_src"
+done
+REPO_ROOT="$(cd -P "$(dirname "$_src")/.." && pwd)"
 DATA_DIR="${HANDOFF_BATON_DATA:-$REPO_ROOT}"
 TOOL="${1:-claude}"
 FILE="${2:-}"

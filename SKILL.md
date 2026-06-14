@@ -69,15 +69,15 @@ context names it (`current agent: …`); if invoked manually, detect it from
 `$AI_AGENT` / `$CLAUDECODE` (Claude Code) or `$CODEX*` (Codex), defaulting to
 `claude`. Substitute that for `<tool>` below.
 
-Tell the user exactly this:
+Tell the user exactly this (prefer the **bare** command — no path to paste):
 
 > Handoff saved: `<full path to the doc>`
 >
-> To continue, exit this session (`/exit` or Ctrl-D), then run:
+> To continue, exit this session (`/exit` or Ctrl-D), then from this folder run:
 >
 > ```
-> hresume <tool> "<full path to the doc>"
+> hresume <tool>
 > ```
 >
-> From the project directory, a bare `hresume <tool>` also works — it loads the
-> newest handoff for this project.
+> That loads the newest handoff for this project. If you've changed folders,
+> pass the file explicitly: `hresume <tool> "<full path to the doc>"`.
