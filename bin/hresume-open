@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Open a fresh agent session in a NEW terminal window, seeded with a handoff.
+# This is what lets a handoff "auto-resume": the current session can't relaunch
+# itself, but it can spawn a new interactive window that does.
+#   hresume-open [claude|codex] [handoff-file]
+# macOS only (uses osascript + Terminal or iTerm). Falls back to printing the
+# command elsewhere.
+set -euo pipefail
+
+TOOL="${1:-claude}"
+FILE="${2:-}"
+DIR="$PWD"
+
+if [ -n "$FILE" ]; then
+  INNER="cd '$DIR' && hresume $TOOL '$FILE'"
+else
+  INNER="cd '$DIR' && hresume $TOOL"
+fi
+
+# Dry-run / non-macOS: just show what would run.
+if [ "${HRESUME_OPEN_DRYRUN:-}" = "1" ] || [ "$(uname)" != "Darwin" ]; then
+  echo "$INNER"
+  exit 0
+fi
+
+if pgrep -x iTerm2 >/dev/null 2>&1; then
+  osascript >/dev/null <<OSA
+tell application "iTerm"
+  activate
+  create window with default profile
+  tell current session of current window to write text "$INNER"
+end tell
+OSA
+else
+  osascript >/dev/null <<OSA
+tell application "Terminal"
+  activate
+  do script "$INNER"
+end tell
+OSA
+fi
+echo "Opened a fresh $TOOL session in a new terminal window."

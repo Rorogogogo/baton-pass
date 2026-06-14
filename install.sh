@@ -12,13 +12,14 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 echo "Installing handoff-baton from: $REPO"
 
 # 1. make scripts executable
-chmod +x "$REPO/hooks/handoff_baton_check.py" "$REPO/bin/hb-state" "$REPO/bin/hresume"
+chmod +x "$REPO/hooks/handoff_baton_check.py" "$REPO/bin/hb-state" "$REPO/bin/hresume" "$REPO/bin/hresume-open"
 
 # 2. put commands on PATH
 mkdir -p "$BIN_DIR"
-ln -sf "$REPO/bin/hresume"  "$BIN_DIR/hresume"
-ln -sf "$REPO/bin/hb-state" "$BIN_DIR/hb-state"
-echo "  ✓ hresume, hb-state → $BIN_DIR"
+ln -sf "$REPO/bin/hresume"      "$BIN_DIR/hresume"
+ln -sf "$REPO/bin/hresume-open" "$BIN_DIR/hresume-open"
+ln -sf "$REPO/bin/hb-state"     "$BIN_DIR/hb-state"
+echo "  ✓ hresume, hresume-open, hb-state → $BIN_DIR"
 
 # 3. install the skill
 mkdir -p "$CLAUDE_DIR/skills/handoff-baton"
