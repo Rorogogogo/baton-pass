@@ -71,11 +71,20 @@ Stop hook (after every turn)
         2. Extend +10K            → bump this session's threshold, continue
         3. Disable this convo     → stop asking this session, continue
         4. Skip                   → continue, ask again next turn
+```
 
-After "Handoff now":  exit the session (/exit), then run `hresume` from the
-project folder → a fresh session seeded with the handoff doc as its opening
-prompt. The agent (claude / codex) is auto-detected, so it suggests the right
-command.
+After "Handoff now":  exit the session (/exit), then run `hresume` → a fresh
+session seeded with the handoff doc as its opening prompt. The agent
+(claude / codex) is auto-detected, so it suggests the right command.
+
+`hresume` finds the right handoff for you, so you never have to paste a long,
+space-containing path:
+
+```
+hresume                       # newest handoff for the current folder,
+                              #   or newest overall if there's none here
+hresume claude handoff-baton  # target a project by name, from anywhere
+hresume --list                # see every saved handoff, newest first
 ```
 
 A few deliberate design points:
@@ -232,7 +241,7 @@ runtime data, never committed.
 
 | Command | What it does |
 | ------- | ------------ |
-| `hresume [claude\|codex] [file]` | Relaunch into a fresh session from a handoff (newest for the current project if no file given). Run it after you exit the old session. |
+| `hresume [claude\|codex] [project\|file]` | Relaunch into a fresh session from a handoff. With no second arg: newest for the current folder, else newest overall. Pass a project name (from anywhere) or a file path to target one. `hresume --list` shows all. Run it after you exit the old session. |
 | `hb-state extend <session_id> <value>` | Raise a session's threshold. |
 | `hb-state disable <session_id>` | Silence handoff-baton for a session. |
 | `hb-state reset <session_id>` | Clear a session's state. |

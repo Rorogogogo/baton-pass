@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # Resume work in a fresh session from a handoff document.
-#   hresume [claude|codex] [handoff-file]
-# With no file, picks the newest handoff for the current project folder.
+#   hresume [claude|codex] [project|file]
+#   hresume --list
+#
+# Picking the handoff when you don't pass a file:
+#   1. a project named in arg 2 (exact dir, else substring match)
+#   2. the newest handoff for the current directory's project
+#   3. the newest handoff across ALL projects (and it tells you which)
+# So `hresume claude` works from anywhere, and `hresume claude handoff-baton`
+# targets a project by name — no need to paste a long, space-containing path.
 set -euo pipefail
 
 # Resolve our real location even when invoked via a symlink (e.g. ~/.local/bin).
@@ -13,19 +20,63 @@ while [ -L "$_src" ]; do
 done
 REPO_ROOT="$(cd -P "$(dirname "$_src")/.." && pwd)"
 DATA_DIR="${HANDOFF_BATON_DATA:-$REPO_ROOT}"
-TOOL="${1:-claude}"
-FILE="${2:-}"
-PROJECT="$(basename "$PWD")"
+HANDOFFS="$DATA_DIR/handoffs"
 
-if [[ -z "$FILE" ]]; then
-  FILE="$(ls -t "$DATA_DIR/handoffs/$PROJECT/"*.md 2>/dev/null | head -n1 || true)"
+list_handoffs() {
+  if ! ls "$HANDOFFS"/*/*.md >/dev/null 2>&1; then
+    echo "hresume: no handoffs found under $HANDOFFS" >&2
+    return 1
+  fi
+  echo "Available handoffs (newest first):" >&2
+  ls -t "$HANDOFFS"/*/*.md 2>/dev/null | while IFS= read -r f; do
+    printf '  %-24s %s\n' "$(basename "$(dirname "$f")")" "$f" >&2
+  done
+}
+
+if [[ "${1:-}" == "--list" || "${1:-}" == "-l" ]]; then
+  list_handoffs
+  exit $?
+fi
+
+TOOL="${1:-claude}"
+TARGET="${2:-}"
+FILE=""
+
+if [[ -n "$TARGET" && -f "$TARGET" ]]; then
+  # Explicit file path.
+  FILE="$TARGET"
+elif [[ -n "$TARGET" ]]; then
+  # Treat as a project name: exact dir first, then substring match.
+  if [[ -d "$HANDOFFS/$TARGET" ]]; then
+    FILE="$(ls -t "$HANDOFFS/$TARGET/"*.md 2>/dev/null | head -n1 || true)"
+  else
+    match="$(ls -d "$HANDOFFS/"*"$TARGET"*/ 2>/dev/null | head -n1 || true)"
+    [[ -n "$match" ]] && FILE="$(ls -t "$match"*.md 2>/dev/null | head -n1 || true)"
+  fi
+  if [[ -z "$FILE" ]]; then
+    echo "hresume: no handoff matching '$TARGET'." >&2
+    list_handoffs || true
+    exit 1
+  fi
+else
+  # No target: current project, then fall back to the newest overall.
+  PROJECT="$(basename "$PWD")"
+  FILE="$(ls -t "$HANDOFFS/$PROJECT/"*.md 2>/dev/null | head -n1 || true)"
+  if [[ -z "$FILE" ]]; then
+    FILE="$(ls -t "$HANDOFFS/"*/*.md 2>/dev/null | head -n1 || true)"
+    if [[ -n "$FILE" ]]; then
+      echo "hresume: no handoff for '$PROJECT'; loading newest overall (project: $(basename "$(dirname "$FILE")"))." >&2
+    fi
+  fi
 fi
 
 if [[ -z "$FILE" || ! -f "$FILE" ]]; then
-  echo "hresume: no handoff file found for project '$PROJECT'." >&2
-  echo "         pass one explicitly: hresume $TOOL <path-to-handoff.md>" >&2
+  echo "hresume: no handoff file found." >&2
+  echo "         see what's available: hresume --list" >&2
   exit 1
 fi
+
+echo "hresume: loading $FILE" >&2
 
 PROMPT="Resuming from a handoff document. Read it and continue the work it describes.
 
