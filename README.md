@@ -109,18 +109,31 @@ That's the whole point of an agent — it can read this repo and install itself.
 
 ### 🟣 Claude Code — first-class (tested)
 
+**One command:**
+
 ```sh
 git clone https://github.com/Rorogogogo/handoff-baton && cd handoff-baton
-chmod +x hooks/handoff_baton_check.py bin/hb-state bin/hresume
-echo "export PATH=\"$PWD/bin:\$PATH\"" >> ~/.zshrc
+./install.sh
+```
 
-# install the skill
+`install.sh` makes the scripts executable, symlinks the skill and the `hresume` /
+`hb-state` commands onto your PATH, and **merges** the Stop hook into your
+`~/.claude/settings.json` — preserving any existing hooks, backing the file up to
+`settings.json.bak`, and skipping if it's already there. Restart Claude Code to
+load it. Reverse anytime with `./uninstall.sh`.
+
+<details>
+<summary>Prefer to wire it up by hand?</summary>
+
+```sh
+chmod +x hooks/handoff_baton_check.py bin/hb-state bin/hresume
+ln -s "$PWD/bin/hresume"  ~/.local/bin/hresume
+ln -s "$PWD/bin/hb-state" ~/.local/bin/hb-state
 mkdir -p ~/.claude/skills/handoff-baton
 ln -s "$PWD/SKILL.md" ~/.claude/skills/handoff-baton/SKILL.md
 ```
 
-Then merge `settings.example.json` into `~/.claude/settings.json` (replace the
-path):
+Then add to `~/.claude/settings.json` (see `settings.example.json`):
 
 ```json
 {
@@ -134,6 +147,7 @@ path):
   }
 }
 ```
+</details>
 
 ### 🟢 OpenAI Codex CLI — supported (needs the hooks flag)
 
