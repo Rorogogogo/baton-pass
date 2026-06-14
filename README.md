@@ -66,19 +66,27 @@ Stop hook (after every turn)
   ├─ read context size + this session's threshold   (free — just reads the transcript)
   ├─ disabled for this session?  → do nothing
   ├─ under threshold?            → do nothing
-  └─ over threshold? → block the stop and ask you:
-        1. Handoff now            → write handoff doc, then run `hresume`
+  └─ over threshold? → one-line notice + a native ↑/↓ picker:
+        1. Handoff now            → write handoff doc, then: exit + `hresume`
         2. Extend +10K            → bump this session's threshold, continue
         3. Disable this convo     → stop asking this session, continue
         4. Skip                   → continue, ask again next turn
 
-hresume claude|codex   → fresh session, handoff doc passed in as the opening prompt
+After "Handoff now":  exit the session (/exit), then run `hresume` from the
+project folder → a fresh session seeded with the handoff doc as its opening
+prompt. The agent (claude / codex) is auto-detected, so it suggests the right
+command.
 ```
 
-The check is **free** — it only reads token counts already recorded in the
-transcript file, no model call. Resuming passes the handoff **in the opening
-prompt** (not via a session-start hook), so an unrelated new session never
-inherits a stale handoff.
+A few deliberate design points:
+
+- **The check is free** — it only reads token counts already recorded in the
+  transcript file; no model call, no tokens spent.
+- **The transcript stays clean** — only a one-line notice is shown; all the
+  detail (options, exact commands) rides a silent `additionalContext` channel
+  that drives the native picker without cluttering your chat.
+- **No stale handoffs** — resuming passes the doc **in the opening prompt** (not
+  via a session-start hook), so an unrelated new session never inherits one.
 
 ---
 
