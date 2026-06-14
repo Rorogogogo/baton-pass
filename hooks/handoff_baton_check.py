@@ -10,6 +10,7 @@ in <data>/state/<session_id>.json.
 import sys
 import os
 import json
+import shutil
 
 BASE_THRESHOLD = int(os.environ.get("HANDOFF_BATON_THRESHOLD", "160000"))
 EXTEND_STEP = int(os.environ.get("HANDOFF_BATON_EXTEND_STEP", "10000"))
@@ -46,24 +47,24 @@ def read_context_tokens(path):
     )
 
 
-def build_reason(*, tokens, threshold, session_id, handoff_dir, hb_state, extend_value):
-    return f"""[handoff-baton] Context is at {tokens:,} tokens (threshold {threshold:,}).
+def resolve_cmd(name, repo_root):
+    """Prefer the bare command name when it's installed on PATH; else absolute."""
+    if shutil.which(name) or os.path.exists(os.path.expanduser(f"~/.local/bin/{name}")):
+        return name
+    return os.path.join(repo_root, "bin", name)
 
-Before continuing, ask the user how they want to proceed. Offer exactly these
-options and act on their choice — do not choose for them:
 
-1. Handoff now — Invoke the `handoff-baton` skill to write a handoff document to:
-     {handoff_dir}/handoff-<timestamp>.md
-   Then tell the user to resume in a fresh session with:  hresume claude
-   (or:  hresume codex)
-
-2. Extend +10K — Raise this session's threshold, then continue. Run:
-     {hb_state} extend {session_id} {extend_value}
-
-3. Disable for this conversation — Stop asking in this session, then continue. Run:
-     {hb_state} disable {session_id}
-
-4. Skip — Do nothing; you'll be asked again on the next turn. Just continue."""
+def build_reason(*, tokens, threshold, session_id, handoff_dir, hb_state, hresume, extend_value):
+    return (
+        f"[handoff-baton] Context is at {tokens:,} tokens (threshold {threshold:,}).\n\n"
+        "Use the AskUserQuestion tool (the native option picker) to ask how to proceed "
+        "— do NOT ask in plain text. Offer these four options and act on the choice:\n\n"
+        f"• Handoff now — run the `handoff-baton` skill to write the handoff doc under "
+        f"{handoff_dir}/, then tell the user to resume with `{hresume} claude` (or `{hresume} codex`).\n"
+        f"• Extend +10K — run `{hb_state} extend {session_id} {extend_value}`, then continue.\n"
+        f"• Disable here — run `{hb_state} disable {session_id}`, then continue.\n"
+        "• Skip — continue; you'll be asked again next turn."
+    )
 
 
 def main():
@@ -84,7 +85,6 @@ def main():
 
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = os.environ.get("HANDOFF_BATON_DATA", repo_root)
-    hb_state = os.path.join(repo_root, "bin", "hb-state")
     state_path = os.path.join(data_dir, "state", f"{session_id}.json")
 
     state = {}
@@ -109,7 +109,8 @@ def main():
         threshold=threshold,
         session_id=session_id,
         handoff_dir=os.path.join(data_dir, "handoffs", project),
-        hb_state=hb_state,
+        hb_state=resolve_cmd("hb-state", repo_root),
+        hresume=resolve_cmd("hresume", repo_root),
         extend_value=tokens + EXTEND_STEP,
     )
     print(json.dumps({"decision": "block", "reason": reason}))
