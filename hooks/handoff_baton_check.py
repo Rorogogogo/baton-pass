@@ -54,14 +54,28 @@ def resolve_cmd(name, repo_root):
     return os.path.join(repo_root, "bin", name)
 
 
-def build_instructions(*, session_id, handoff_dir, hb_state, hresume, extend_value):
+def detect_tool():
+    """Best-guess the agent we're running under, so we suggest the right resume
+    command. Override with HANDOFF_BATON_TOOL."""
+    forced = os.environ.get("HANDOFF_BATON_TOOL", "").strip().lower()
+    if forced:
+        return forced
+    agent = os.environ.get("AI_AGENT", "").lower()
+    if "codex" in agent or any(k.startswith("CODEX") for k in os.environ):
+        return "codex"
+    if "claude" in agent or os.environ.get("CLAUDECODE"):
+        return "claude"
+    return "claude"
+
+
+def build_instructions(*, session_id, handoff_dir, hb_state, hresume, extend_value, tool):
     """Detailed, model-facing instructions — delivered silently via additionalContext."""
     return (
-        "The handoff-baton context threshold was reached. Use the AskUserQuestion tool "
-        "(the native option picker) to ask how to proceed — do NOT ask in plain text. "
-        "Offer these four options and act on the choice:\n\n"
+        f"The handoff-baton context threshold was reached (current agent: {tool}). "
+        "Use the AskUserQuestion tool (the native option picker) to ask how to proceed "
+        "— do NOT ask in plain text. Offer these four options and act on the choice:\n\n"
         f"• Handoff now — run the `handoff-baton` skill to write the handoff doc under "
-        f"{handoff_dir}/, then tell the user to resume with `{hresume} claude` (or `{hresume} codex`).\n"
+        f"{handoff_dir}/, then tell the user to exit and resume with `{hresume} {tool}`.\n"
         f"• Extend +10K — run `{hb_state} extend {session_id} {extend_value}`, then continue.\n"
         f"• Disable here — run `{hb_state} disable {session_id}`, then continue.\n"
         "• Skip — continue; you'll be asked again next turn."
@@ -111,6 +125,7 @@ def main():
         hb_state=resolve_cmd("hb-state", repo_root),
         hresume=resolve_cmd("hresume", repo_root),
         extend_value=tokens + EXTEND_STEP,
+        tool=detect_tool(),
     )
     # Short, user-visible notice; the actionable detail rides the silent
     # additionalContext channel so it never clutters the transcript.

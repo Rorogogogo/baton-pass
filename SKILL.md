@@ -64,6 +64,11 @@ Once the doc is written, print the file path and a copy-pasteable resume
 command. Do **not** try to open or launch anything automatically (the current
 session can't relaunch itself, and guessing the user's terminal is unreliable).
 
+Use the **agent the user is actually running** for the command. The hook's
+context names it (`current agent: …`); if invoked manually, detect it from
+`$AI_AGENT` / `$CLAUDECODE` (Claude Code) or `$CODEX*` (Codex), defaulting to
+`claude`. Substitute that for `<tool>` below.
+
 Tell the user exactly this:
 
 > Handoff saved: `<full path to the doc>`
@@ -71,8 +76,8 @@ Tell the user exactly this:
 > To continue, exit this session (`/exit` or Ctrl-D), then run:
 >
 > ```
-> hresume claude "<full path to the doc>"
+> hresume <tool> "<full path to the doc>"
 > ```
 >
-> (or `hresume codex "…"`). From the project directory, a bare `hresume claude`
-> also works — it loads the newest handoff for this project.
+> From the project directory, a bare `hresume <tool>` also works — it loads the
+> newest handoff for this project.

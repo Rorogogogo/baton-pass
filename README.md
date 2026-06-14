@@ -199,6 +199,7 @@ Set via env vars (in your shell, or on the hook command):
 | `HANDOFF_BATON_THRESHOLD`   | `160000`     | Base context threshold in tokens (~80% of a 200K window — fires before auto-compact). |
 | `HANDOFF_BATON_EXTEND_STEP` | `10000`      | How much "Extend" adds (current + step).                         |
 | `HANDOFF_BATON_DATA`        | the repo dir | Where `state/` and `handoffs/` live.                             |
+| `HANDOFF_BATON_TOOL`        | auto-detect  | Force the resume target (`claude`/`codex`). Auto-detected from `$AI_AGENT`/`$CLAUDECODE` otherwise. |
 
 ---
 
