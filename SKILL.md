@@ -58,16 +58,21 @@ Rules:
 - **Redact secrets** — API keys, passwords, tokens, PII.
 - **Be concise.** The whole point is a small starting context. Link, don't paste.
 
-## After writing — offer to resume
+## After writing — how to resume
 
-Once the doc is written, use the **AskUserQuestion** tool (native picker, not
-plain text) to ask *"Open a fresh session now?"* with options:
+Once the doc is written, print the file path and a copy-pasteable resume
+command. Do **not** try to open or launch anything automatically (the current
+session can't relaunch itself, and guessing the user's terminal is unreliable).
 
-- **Open in Claude** → run `hresume-open claude "<path to the doc you just wrote>"`
-- **Open in Codex** → run `hresume-open codex "<path to the doc you just wrote>"`
-- **Not now** → just print the file path and `hresume claude` so they can do it later.
+Tell the user exactly this:
 
-`hresume-open` launches a **new terminal window** running a fresh session seeded
-with that exact handoff file (the current session can't relaunch itself). Pass
-the full path of the doc you just wrote so the right file is loaded. After
-opening, remind the user they can close this old session.
+> Handoff saved: `<full path to the doc>`
+>
+> To continue, exit this session (`/exit` or Ctrl-D), then run:
+>
+> ```
+> hresume claude "<full path to the doc>"
+> ```
+>
+> (or `hresume codex "…"`). From the project directory, a bare `hresume claude`
+> also works — it loads the newest handoff for this project.

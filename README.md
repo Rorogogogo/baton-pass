@@ -223,8 +223,7 @@ runtime data, never committed.
 
 | Command | What it does |
 | ------- | ------------ |
-| `hresume [claude\|codex] [file]` | Relaunch the **current** shell into a fresh session from a handoff (newest for the current project if no file given). |
-| `hresume-open [claude\|codex] [file]` | Open a fresh session in a **new terminal window** (macOS). Used by the skill to "auto-resume" after a handoff. |
+| `hresume [claude\|codex] [file]` | Relaunch into a fresh session from a handoff (newest for the current project if no file given). Run it after you exit the old session. |
 | `hb-state extend <session_id> <value>` | Raise a session's threshold. |
 | `hb-state disable <session_id>` | Silence handoff-baton for a session. |
 | `hb-state reset <session_id>` | Clear a session's state. |

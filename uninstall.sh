@@ -11,7 +11,7 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 echo "Uninstalling handoff-baton..."
 
 # commands
-rm -f "$BIN_DIR/hresume" "$BIN_DIR/hresume-open" "$BIN_DIR/hb-state"
+rm -f "$BIN_DIR/hresume" "$BIN_DIR/hb-state"
 echo "  ✓ removed command symlinks"
 
 # skill
