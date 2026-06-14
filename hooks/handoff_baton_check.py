@@ -54,11 +54,12 @@ def resolve_cmd(name, repo_root):
     return os.path.join(repo_root, "bin", name)
 
 
-def build_reason(*, tokens, threshold, session_id, handoff_dir, hb_state, hresume, extend_value):
+def build_instructions(*, session_id, handoff_dir, hb_state, hresume, extend_value):
+    """Detailed, model-facing instructions — delivered silently via additionalContext."""
     return (
-        f"[handoff-baton] Context is at {tokens:,} tokens (threshold {threshold:,}).\n\n"
-        "Use the AskUserQuestion tool (the native option picker) to ask how to proceed "
-        "— do NOT ask in plain text. Offer these four options and act on the choice:\n\n"
+        "The handoff-baton context threshold was reached. Use the AskUserQuestion tool "
+        "(the native option picker) to ask how to proceed — do NOT ask in plain text. "
+        "Offer these four options and act on the choice:\n\n"
         f"• Handoff now — run the `handoff-baton` skill to write the handoff doc under "
         f"{handoff_dir}/, then tell the user to resume with `{hresume} claude` (or `{hresume} codex`).\n"
         f"• Extend +10K — run `{hb_state} extend {session_id} {extend_value}`, then continue.\n"
@@ -104,16 +105,24 @@ def main():
     if tokens is None or tokens < threshold:
         sys.exit(0)
 
-    reason = build_reason(
-        tokens=tokens,
-        threshold=threshold,
+    instructions = build_instructions(
         session_id=session_id,
         handoff_dir=os.path.join(data_dir, "handoffs", project),
         hb_state=resolve_cmd("hb-state", repo_root),
         hresume=resolve_cmd("hresume", repo_root),
         extend_value=tokens + EXTEND_STEP,
     )
-    print(json.dumps({"decision": "block", "reason": reason}))
+    # Short, user-visible notice; the actionable detail rides the silent
+    # additionalContext channel so it never clutters the transcript.
+    notice = f"[handoff-baton] Context {tokens:,} ≥ {threshold:,} — pick how to proceed."
+    print(json.dumps({
+        "decision": "block",
+        "reason": notice,
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": instructions,
+        },
+    }))
     sys.exit(0)
 
 
