@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/ABSOLUTE/PATH/TO/baton-pass/bin/baton check"
+            "command": "\"/ABSOLUTE/PATH/TO/baton-pass/bin/baton\" check"
           }
         ]
       }

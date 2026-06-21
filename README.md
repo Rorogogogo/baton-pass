@@ -6,9 +6,12 @@
 
 A Stop-hook + skill that watches your agent's context size and, when it gets
 expensive, hands the work off to a *fresh* session — so you stop paying to
-re-send a giant transcript on every single turn.
+re-send a giant transcript on every single turn. It's a single dependency-free
+**Go** binary — no Python, Node, or `jq` to install.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Built with Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)
+![No runtime deps](https://img.shields.io/badge/runtime%20deps-none-success)
 ![skills.sh](https://img.shields.io/badge/install-skills.sh-black)
 ![agents](https://img.shields.io/badge/agents-Claude%20Code%20·%20Codex%20·%20Cursor-blue)
 
@@ -164,7 +167,7 @@ Then add to `~/.claude/settings.json` (see `settings.example.json`):
     "Stop": [
       { "hooks": [
         { "type": "command",
-          "command": "/ABSOLUTE/PATH/baton-pass/bin/baton check" }
+          "command": "\"/ABSOLUTE/PATH/baton-pass/bin/baton\" check" }
       ] }
     ]
   }
@@ -190,7 +193,7 @@ codex_hooks = true
   "hooks": {
     "Stop": [
       { "hooks": [ { "type": "command",
-        "command": "/ABSOLUTE/PATH/baton-pass/bin/baton check" } ] }
+        "command": "\"/ABSOLUTE/PATH/baton-pass/bin/baton\" check" } ] }
     ]
   }
 }
@@ -269,6 +272,15 @@ runtime data, never committed.
 
 ---
 
+## 🙏 Credits
+
+The handoff **skill** (`SKILL.md` — how the handoff document is written) is adapted
+from [Matt Pocock's `handoff` skill](https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff)
+(MIT). `baton-pass` wires that idea into an automatic, cost-driven workflow: a
+zero-dependency [Go](https://go.dev) Stop-hook that watches context size across
+Claude Code and Codex, plus `batonresume` to relaunch a fresh session. Thanks Matt! 🎩
+
 ## 📄 License
 
-[MIT](./LICENSE) © Robert Wang
+[MIT](./LICENSE) © 2026 Robert Wang.
+Portions of `SKILL.md` © 2026 Matt Pocock, used under the MIT License — see [LICENSE](./LICENSE).

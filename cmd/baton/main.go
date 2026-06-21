@@ -353,7 +353,8 @@ func hookSettings(action string, args []string) {
 			self = resolved
 		}
 	}
-	command := fmt.Sprintf("%s check", self)
+	// Quote the path: it's run through /bin/sh and may contain spaces.
+	command := fmt.Sprintf("%q check", self)
 
 	var data map[string]any
 	if b, err := os.ReadFile(settingsPath); err == nil {
@@ -439,10 +440,13 @@ func groupHasHook(grp any) bool {
 			continue
 		}
 		cmd, _ := hm["command"].(string)
+		// Strip quotes first so we match whether or not the path was quoted
+		// (quoting is required when the install path contains spaces).
+		cmd = strings.ReplaceAll(cmd, `"`, "")
 		// Match the new Go binary (`baton check` / …/baton) plus legacy installs
 		// (the old `hb` binary and the original python hook) so uninstall migrates.
 		if strings.Contains(cmd, "baton check") ||
-			strings.HasSuffix(cmd, "/baton") ||
+			strings.Contains(cmd, "/baton ") ||
 			strings.Contains(cmd, "handoff_baton_check.py") ||
 			strings.Contains(cmd, "hb check") ||
 			strings.HasSuffix(cmd, "/hb") {
