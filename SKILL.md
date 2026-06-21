@@ -11,6 +11,9 @@ handoff document so a fresh session (`claude` or `codex`) can pick up the work
 with a small, cheap context — instead of paying to re-send a huge transcript
 every turn.
 
+> Adapted from Matt Pocock's `handoff` skill
+> (https://github.com/mattpocock/skills, MIT).
+
 ## When you are invoked
 
 There are two paths:
