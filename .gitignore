@@ -2,6 +2,6 @@
 /state/
 /handoffs/
 
-# Python
-__pycache__/
-*.pyc
+# Built / downloaded binary (produced by install.sh or scripts/build-release.sh)
+/bin/baton
+/dist/

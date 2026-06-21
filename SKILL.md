@@ -1,10 +1,10 @@
 ---
-name: handoff-baton
+name: baton-pass
 description: Watch conversation context size and, when it crosses a threshold, hand the session off to a fresh one via a saved handoff document. Generates the handoff doc and manages per-session thresholds.
 argument-hint: "[focus for the next session]"
 ---
 
-# handoff-baton
+# baton-pass
 
 A relay baton for long conversations: when the context grows large, write a
 handoff document so a fresh session (`claude` or `codex`) can pick up the work
@@ -15,9 +15,9 @@ every turn.
 
 There are two paths:
 
-- **Automatically**, by the `handoff-baton` Stop hook, when context crosses the
+- **Automatically**, by the `baton-pass` Stop hook, when context crosses the
   threshold. The hook injects the current token count, the `session_id`, the
-  target handoff directory, and the exact `hb-state` commands to run. Present the
+  target handoff directory, and the exact `baton` commands to run. Present the
   options menu below.
 - **Manually**, when the user runs the skill themselves. Skip the menu and
   generate a handoff document immediately. If the user passed an argument, treat
@@ -28,10 +28,10 @@ There are two paths:
 Ask the user to choose, then act on their choice. **Never choose for them.**
 
 1. **Handoff now** — Write the handoff document (see below), then tell the user
-   to resume with `hresume claude` (or `hresume codex`).
-2. **Extend +10K** — Run the `hb-state extend <session_id> <value>` command the
+   to resume with `batonresume claude` (or `batonresume codex`).
+2. **Extend +10K** — Run the `baton extend <session_id> <value>` command the
    hook provided, then continue the user's current work.
-3. **Disable for this conversation** — Run the `hb-state disable <session_id>`
+3. **Disable for this conversation** — Run the `baton disable <session_id>`
    command the hook provided, then continue.
 4. **Skip** — Do nothing; the hook will ask again on the next turn. Just
    continue the work.
@@ -76,8 +76,8 @@ Tell the user exactly this (prefer the **bare** command — no path to paste):
 > To continue, exit this session (`/exit` or Ctrl-D), then from this folder run:
 >
 > ```
-> hresume <tool>
+> batonresume <tool>
 > ```
 >
 > That loads the newest handoff for this project. If you've changed folders,
-> pass the file explicitly: `hresume <tool> "<full path to the doc>"`.
+> pass the file explicitly: `batonresume <tool> "<full path to the doc>"`.

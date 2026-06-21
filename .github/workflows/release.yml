@@ -1,0 +1,27 @@
+name: release
+
+# Cross-compiles the baton binary and attaches the assets to the GitHub Release
+# whenever a tag like v1.2.3 is pushed. install.sh downloads these when the
+# user has no Go toolchain.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+      - name: Build binaries
+        run: ./scripts/build-release.sh
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/baton_*

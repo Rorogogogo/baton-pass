@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🏃 handoff-baton
+# 🏃 baton-pass
 
 **Pass the baton before your context runs out of breath.**
 
@@ -21,12 +21,12 @@ re-send a giant transcript on every single turn.
 Every turn of an agent conversation re-sends the **entire context** to the model.
 As a session grows, two bad things happen:
 
-1. **Cost climbs every turn.** A conversation parked at 160K tokens pays for
-   ~160K of context *on each reply* — forever, until you stop.
+1. **Cost climbs every turn.** A conversation parked at 190K tokens pays for
+   ~190K of context *on each reply* — forever, until you stop.
 2. **Auto-compaction kicks in.** Near the window limit your agent silently
    compacts the history into a lossy summary you didn't write and can't review.
 
-`handoff-baton` fixes both. When you cross a threshold, it offers to write a
+`baton-pass` fixes both. When you cross a threshold, it offers to write a
 clean **handoff document** and restart in a fresh session seeded with just that
 doc — resetting your context from *huge* back to *tiny*.
 
@@ -41,14 +41,14 @@ The recurring cost of a turn scales with context size. With prompt caching, a
 cached re-read costs roughly **10%** of the context's token price — but you pay
 it *every turn*. Resetting context is what saves money.
 
-**Illustrative scenario** — you've reached **160K tokens** and still have work to do:
+**Illustrative scenario** — you've reached **190K tokens** and still have work to do:
 
 | Remaining work | Without handoff | With handoff* | You save |
 | -------------- | --------------- | ------------- | -------- |
-| 40 more turns  | ~640K tok-equiv | ~200K tok-equiv | **~70%** |
-| 100 more turns | ~1.6M tok-equiv | ~260K tok-equiv | **~84%** |
+| 40 more turns  | ~760K tok-equiv | ~230K tok-equiv | **~70%** |
+| 100 more turns | ~1.9M tok-equiv | ~290K tok-equiv | **~85%** |
 
-<sub>\* "With handoff" = one-time ~160K-token summarization pass, then a fresh
+<sub>\* "With handoff" = one-time ~190K-token summarization pass, then a fresh
 ~10K context billed at ~10% cached reads per turn. Figures are token-equivalents
 and approximate — actual savings depend on model pricing, cache hit rate, and
 output size. **The longer you keep working past the threshold, the bigger the win.**</sub>
@@ -67,24 +67,24 @@ Stop hook (after every turn)
   ├─ disabled for this session?  → do nothing
   ├─ under threshold?            → do nothing
   └─ over threshold? → one-line notice + a native ↑/↓ picker:
-        1. Handoff now            → write handoff doc, then: exit + `hresume`
+        1. Handoff now            → write handoff doc, then: exit + `batonresume`
         2. Extend +10K            → bump this session's threshold, continue
         3. Disable this convo     → stop asking this session, continue
         4. Skip                   → continue, ask again next turn
 ```
 
-After "Handoff now":  exit the session (/exit), then run `hresume` → a fresh
+After "Handoff now":  exit the session (/exit), then run `batonresume` → a fresh
 session seeded with the handoff doc as its opening prompt. The agent
 (claude / codex) is auto-detected, so it suggests the right command.
 
-`hresume` finds the right handoff for you, so you never have to paste a long,
+`batonresume` finds the right handoff for you, so you never have to paste a long,
 space-containing path:
 
 ```
-hresume                       # newest handoff for the current folder,
+batonresume                       # newest handoff for the current folder,
                               #   or newest overall if there's none here
-hresume claude handoff-baton  # target a project by name, from anywhere
-hresume --list                # see every saved handoff, newest first
+batonresume claude baton-pass  # target a project by name, from anywhere
+batonresume --list                # see every saved handoff, newest first
 ```
 
 A few deliberate design points:
@@ -107,17 +107,17 @@ Don't wire it up by hand — let your agent do it. Paste this into Claude Code,
 Codex, or Cursor from inside the folder where you want it:
 
 ```
-Install handoff-baton for me.
+Install baton-pass for me.
 
-1. Clone https://github.com/Rorogogogo/handoff-baton (or tell me where it is).
-2. chmod +x its hooks/handoff_baton_check.py, bin/hb-state, bin/hresume.
+1. Clone https://github.com/Rorogogogo/baton-pass (or tell me where it is).
+2. Run its ./install.sh (builds the `baton` binary, or downloads a prebuilt one).
 3. Add its bin/ directory to my PATH (append to my shell rc).
 4. Register the Stop hook from its settings.example.json into MY agent's config:
      - Claude Code → ~/.claude/settings.json  (Stop hook)
      - Codex       → ~/.codex/config.toml      ([hooks], Stop event, codex_hooks=true)
      - Cursor      → my hooks.json             (stop event)
 5. Symlink its SKILL.md into my skills directory.
-6. Then show me how to use `hresume`.
+6. Then show me how to use `batonresume`.
 
 Read the repo's README first, confirm the steps, then do it.
 ```
@@ -129,25 +129,31 @@ That's the whole point of an agent — it can read this repo and install itself.
 **One command:**
 
 ```sh
-git clone https://github.com/Rorogogogo/handoff-baton && cd handoff-baton
+git clone https://github.com/Rorogogogo/baton-pass && cd baton-pass
 ./install.sh
 ```
 
-`install.sh` makes the scripts executable, symlinks the skill and the `hresume` /
-`hb-state` commands onto your PATH, and **merges** the Stop hook into your
-`~/.claude/settings.json` — preserving any existing hooks, backing the file up to
-`settings.json.bak`, and skipping if it's already there. Restart Claude Code to
-load it. Reverse anytime with `./uninstall.sh`.
+`install.sh` builds the single `baton` binary (or downloads a prebuilt one if you
+have no Go toolchain), symlinks the skill and the `baton` / `batonresume` commands onto
+your PATH, and **merges** the Stop hook into your `~/.claude/settings.json` —
+preserving any existing hooks, backing the file up to `settings.json.bak`, and
+skipping if it's already there. Restart Claude Code to load it. Reverse anytime
+with `./uninstall.sh`.
+
+> 🪶 **No runtime dependencies.** `baton` is a self-contained Go binary — no Python,
+> Node, or `jq` to install. The only optional dependency is a Go toolchain *at
+> install time* to build from source; without it, `install.sh` downloads a
+> prebuilt static binary from Releases.
 
 <details>
 <summary>Prefer to wire it up by hand?</summary>
 
 ```sh
-chmod +x hooks/handoff_baton_check.py bin/hb-state bin/hresume
-ln -s "$PWD/bin/hresume"  ~/.local/bin/hresume
-ln -s "$PWD/bin/hb-state" ~/.local/bin/hb-state
-mkdir -p ~/.claude/skills/handoff-baton
-ln -s "$PWD/SKILL.md" ~/.claude/skills/handoff-baton/SKILL.md
+go build -o bin/baton ./cmd/baton        # or download bin/baton from Releases
+ln -s "$PWD/bin/batonresume" ~/.local/bin/batonresume
+ln -s "$PWD/bin/baton"       ~/.local/bin/baton
+mkdir -p ~/.claude/skills/baton-pass
+ln -s "$PWD/SKILL.md" ~/.claude/skills/baton-pass/SKILL.md
 ```
 
 Then add to `~/.claude/settings.json` (see `settings.example.json`):
@@ -158,7 +164,7 @@ Then add to `~/.claude/settings.json` (see `settings.example.json`):
     "Stop": [
       { "hooks": [
         { "type": "command",
-          "command": "python3 /ABSOLUTE/PATH/handoff-baton/hooks/handoff_baton_check.py" }
+          "command": "/ABSOLUTE/PATH/baton-pass/bin/baton check" }
       ] }
     ]
   }
@@ -166,23 +172,37 @@ Then add to `~/.claude/settings.json` (see `settings.example.json`):
 ```
 </details>
 
-### 🟢 OpenAI Codex CLI — supported (needs the hooks flag)
+### 🟢 OpenAI Codex CLI — first-class (needs the hooks flag)
 
-Codex has a compatible `Stop` hook (experimental). Enable it and register the
-script in `~/.codex/config.toml`:
+Codex has a compatible `Stop` hook (experimental). Enable it and register
+`baton check` on the Stop event in `~/.codex/hooks.json` (and turn the feature on in
+`~/.codex/config.toml`):
 
 ```toml
+# ~/.codex/config.toml
 [features]
 codex_hooks = true
-
-# register hooks/handoff_baton_check.py on the Stop event — see the Codex hooks
-# docs for the exact [hooks] / hooks.json schema:
-# https://developers.openai.com/codex/hooks
 ```
 
-> ⚠️ Codex's hook input JSON and transcript format differ from Claude Code's, so
-> the token-reading in `handoff_baton_check.py` may need a small per-agent
-> adapter. The skill, `hresume`, and `hb-state` work as-is. PRs welcome.
+```json
+// ~/.codex/hooks.json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command",
+        "command": "/ABSOLUTE/PATH/baton-pass/bin/baton check" } ] }
+    ]
+  }
+}
+```
+
+> ✅ **Auto-trigger works on Codex too.** Codex's Stop payload uses the same
+> fields as Claude (`session_id`, `transcript_path`, `cwd`, `stop_hook_active`)
+> and also honors `decision: "block"` + `additionalContext`. `baton check` reads
+> Codex's rollout `token_count` events natively (it uses
+> `info.last_token_usage.input_tokens` as the live context size), so the same
+> binary drives the full watch → handoff → `batonresume codex` loop. Tip: Codex
+> windows are larger than 200K, so bump `BATON_THRESHOLD` to suit.
 
 ### 🔵 Cursor — supported
 
@@ -197,11 +217,11 @@ The **skill** is cross-agent (skills.sh markets one skill across Claude Code,
 Codex, Cursor, Gemini, Cline, and more):
 
 ```sh
-npx skills add Rorogogogo/handoff-baton
+npx skills add Rorogogogo/baton-pass
 ```
 
 `npx skills` installs the **skill only** — enough to run handoffs **manually**
-and use `hresume`. Automatic context-watching needs that agent's own Stop-hook
+and use `batonresume`. Automatic context-watching needs that agent's own Stop-hook
 mechanism; if it doesn't have one yet, run the skill by hand when a session gets
 heavy.
 
@@ -213,10 +233,10 @@ Set via env vars (in your shell, or on the hook command):
 
 | Variable                    | Default      | Meaning                                                          |
 | --------------------------- | ------------ | ---------------------------------------------------------------- |
-| `HANDOFF_BATON_THRESHOLD`   | `160000`     | Base context threshold in tokens (~80% of a 200K window — fires before auto-compact). |
-| `HANDOFF_BATON_EXTEND_STEP` | `10000`      | How much "Extend" adds (current + step).                         |
-| `HANDOFF_BATON_DATA`        | the repo dir | Where `state/` and `handoffs/` live.                             |
-| `HANDOFF_BATON_TOOL`        | auto-detect  | Force the resume target (`claude`/`codex`). Auto-detected from `$AI_AGENT`/`$CLAUDECODE` otherwise. |
+| `BATON_THRESHOLD`   | `190000`     | Base context threshold in tokens (~95% of a 200K window — fires before auto-compact). |
+| `BATON_EXTEND_STEP` | `10000`      | How much "Extend" adds (current + step).                         |
+| `BATON_DATA`        | the repo dir | Where `state/` and `handoffs/` live.                             |
+| `BATON_TOOL`        | auto-detect  | Force the resume target (`claude`/`codex`). Auto-detected from `$AI_AGENT`/`$CLAUDECODE` otherwise. |
 
 ---
 
@@ -231,9 +251,9 @@ state/<session_id>.json                              # { threshold_override, dis
 projects stay separate and auditable. Both folders are git-ignored — local
 runtime data, never committed.
 
-> Locally, `HANDOFF_BATON_DATA` defaults to this repo folder so everything lives
+> Locally, `BATON_DATA` defaults to this repo folder so everything lives
 > in one place. If you install to a read-only/managed location, point it at a
-> writable dir (e.g. `~/.handoff-baton`).
+> writable dir (e.g. `~/.baton-pass`).
 
 ---
 
@@ -241,10 +261,11 @@ runtime data, never committed.
 
 | Command | What it does |
 | ------- | ------------ |
-| `hresume [claude\|codex] [project\|file]` | Relaunch into a fresh session from a handoff. With no second arg: newest for the current folder, else newest overall. Pass a project name (from anywhere) or a file path to target one. `hresume --list` shows all. Run it after you exit the old session. |
-| `hb-state extend <session_id> <value>` | Raise a session's threshold. |
-| `hb-state disable <session_id>` | Silence handoff-baton for a session. |
-| `hb-state reset <session_id>` | Clear a session's state. |
+| `batonresume [claude\|codex] [project\|file]` | Relaunch into a fresh session from a handoff. With no second arg: newest for the current folder, else newest overall. Pass a project name (from anywhere) or a file path to target one. `batonresume --list` shows all. Run it after you exit the old session. |
+| `baton extend <session_id> <value>` | Raise a session's threshold. |
+| `baton disable <session_id>` | Silence baton-pass for a session. |
+| `baton reset <session_id>` | Clear a session's state. |
+| `baton check` | The Stop hook itself (reads the hook payload on stdin); you don't call this by hand. |
 
 ---
 
