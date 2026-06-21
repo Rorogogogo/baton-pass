@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /ABSOLUTE/PATH/TO/handoff-baton/hooks/handoff_baton_check.py"
+            "command": "/ABSOLUTE/PATH/TO/baton-pass/bin/baton check"
           }
         ]
       }

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Resume work in a fresh session from a handoff document.
-#   hresume [claude|codex] [project|file]
-#   hresume --list
+#   batonresume [claude|codex] [project|file]
+#   batonresume --list
 #
 # Picking the handoff when you don't pass a file:
 #   1. a project named in arg 2 (exact dir, else substring match)
 #   2. the newest handoff for the current directory's project
 #   3. the newest handoff across ALL projects (and it tells you which)
-# So `hresume claude` works from anywhere, and `hresume claude handoff-baton`
+# So `batonresume claude` works from anywhere, and `batonresume claude baton-pass`
 # targets a project by name — no need to paste a long, space-containing path.
 set -euo pipefail
 
@@ -19,12 +19,12 @@ while [ -L "$_src" ]; do
   [ "${_src#/}" = "$_src" ] && _src="$_dir/$_src"
 done
 REPO_ROOT="$(cd -P "$(dirname "$_src")/.." && pwd)"
-DATA_DIR="${HANDOFF_BATON_DATA:-$REPO_ROOT}"
+DATA_DIR="${BATON_DATA:-$REPO_ROOT}"
 HANDOFFS="$DATA_DIR/handoffs"
 
 list_handoffs() {
   if ! ls "$HANDOFFS"/*/*.md >/dev/null 2>&1; then
-    echo "hresume: no handoffs found under $HANDOFFS" >&2
+    echo "batonresume: no handoffs found under $HANDOFFS" >&2
     return 1
   fi
   echo "Available handoffs (newest first):" >&2
@@ -54,7 +54,7 @@ elif [[ -n "$TARGET" ]]; then
     [[ -n "$match" ]] && FILE="$(ls -t "$match"*.md 2>/dev/null | head -n1 || true)"
   fi
   if [[ -z "$FILE" ]]; then
-    echo "hresume: no handoff matching '$TARGET'." >&2
+    echo "batonresume: no handoff matching '$TARGET'." >&2
     list_handoffs || true
     exit 1
   fi
@@ -65,18 +65,18 @@ else
   if [[ -z "$FILE" ]]; then
     FILE="$(ls -t "$HANDOFFS/"*/*.md 2>/dev/null | head -n1 || true)"
     if [[ -n "$FILE" ]]; then
-      echo "hresume: no handoff for '$PROJECT'; loading newest overall (project: $(basename "$(dirname "$FILE")"))." >&2
+      echo "batonresume: no handoff for '$PROJECT'; loading newest overall (project: $(basename "$(dirname "$FILE")"))." >&2
     fi
   fi
 fi
 
 if [[ -z "$FILE" || ! -f "$FILE" ]]; then
-  echo "hresume: no handoff file found." >&2
-  echo "         see what's available: hresume --list" >&2
+  echo "batonresume: no handoff file found." >&2
+  echo "         see what's available: batonresume --list" >&2
   exit 1
 fi
 
-echo "hresume: loading $FILE" >&2
+echo "batonresume: loading $FILE" >&2
 
 PROMPT="Resuming from a handoff document. Read it and continue the work it describes.
 
@@ -85,5 +85,5 @@ $(cat "$FILE")"
 case "$TOOL" in
   claude) exec claude "$PROMPT" ;;
   codex)  exec codex "$PROMPT" ;;
-  *) echo "hresume: unknown tool '$TOOL' (use 'claude' or 'codex')" >&2; exit 1 ;;
+  *) echo "batonresume: unknown tool '$TOOL' (use 'claude' or 'codex')" >&2; exit 1 ;;
 esac
