@@ -4,6 +4,8 @@
 
 **Pass the baton before your context runs out of breath.**
 
+**English** | [简体中文](./README.zh-CN.md)
+
 A Stop-hook + skill that watches your agent's context size and, when it gets
 expensive, hands the work off to a *fresh* session — so you stop paying to
 re-send a giant transcript on every single turn. It's a single dependency-free
