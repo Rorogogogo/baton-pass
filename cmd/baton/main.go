@@ -7,8 +7,8 @@
 //	baton extend  <session> <value>  Raise a session's threshold.
 //	baton disable <session>          Silence baton-pass for a session.
 //	baton reset   <session>          Clear a session's state.
-//	baton install-hook   <settings>  Register the Stop hook in a settings.json.
-//	baton uninstall-hook <settings>  Remove the Stop hook from a settings.json.
+//	baton install-hook   <settings>  Register the Stop hook in Claude settings.json or Codex hooks.json.
+//	baton uninstall-hook <settings>  Remove the Stop hook from Claude settings.json or Codex hooks.json.
 package main
 
 import (
@@ -64,8 +64,8 @@ usage:
   baton extend  <session> <value>   raise a session's threshold
   baton disable <session>           silence baton-pass for a session
   baton reset   <session>           clear a session's state
-  baton install-hook   <settings>   register the Stop hook in settings.json
-  baton uninstall-hook <settings>   remove the Stop hook from settings.json
+  baton install-hook   <settings>   register the Stop hook in Claude settings.json or Codex hooks.json
+  baton uninstall-hook <settings>   remove the Stop hook from Claude settings.json or Codex hooks.json
 `)
 }
 
@@ -130,18 +130,31 @@ func check() {
 		os.Exit(0)
 	}
 
+	tool := detectTool()
 	instructions := buildInstructions(
 		sessionID,
 		filepath.Join(dataDir, "handoffs", project),
 		resolveCmd("baton", repoRoot),
 		resolveCmd("batonresume", repoRoot),
 		tokens+extendStep(),
-		detectTool(),
+		tool,
 	)
 	notice := fmt.Sprintf("[baton-pass] Context %s ≥ %s — pick how to proceed.",
 		commas(tokens), commas(threshold))
 
-	out := map[string]any{
+	out := buildHookOutput(tool, notice, instructions)
+	enc := json.NewEncoder(os.Stdout)
+	_ = enc.Encode(out)
+}
+
+func buildHookOutput(tool, notice, instructions string) map[string]any {
+	if tool == "codex" {
+		return map[string]any{
+			"decision": "block",
+			"reason":   notice + "\n\n" + instructions,
+		}
+	}
+	return map[string]any{
 		"decision": "block",
 		"reason":   notice,
 		"hookSpecificOutput": map[string]any{
@@ -149,8 +162,6 @@ func check() {
 			"additionalContext": instructions,
 		},
 	}
-	enc := json.NewEncoder(os.Stdout)
-	_ = enc.Encode(out)
 }
 
 // readContextTokens returns the context size used on the last assistant turn.
@@ -220,16 +231,19 @@ func readContextTokens(path string) (int, bool) {
 }
 
 func buildInstructions(sessionID, handoffDir, batonCmd, resumeCmd string, extendValue int, tool string) string {
+	choicePrompt := "Use the AskUserQuestion tool (the native option picker) to ask how to proceed — do NOT ask in plain text. Offer these four options and act on the choice:"
+	if tool == "codex" {
+		choicePrompt = "Present these four options, ask the user how to proceed, and act on their choice:"
+	}
 	return fmt.Sprintf(
 		"The baton-pass context threshold was reached (current agent: %s). "+
-			"Use the AskUserQuestion tool (the native option picker) to ask how to proceed "+
-			"— do NOT ask in plain text. Offer these four options and act on the choice:\n\n"+
+			"%s\n\n"+
 			"• Handoff now — run the `baton-pass` skill to write the handoff doc under "+
 			"%s/, then tell the user to exit and resume with `%s %s`.\n"+
 			"• Extend +10K — run `%s extend %s %d`, then continue.\n"+
 			"• Disable here — run `%s disable %s`, then continue.\n"+
 			"• Skip — continue; you'll be asked again next turn.",
-		tool, handoffDir, resumeCmd, tool, batonCmd, sessionID, extendValue, batonCmd, sessionID,
+		tool, choicePrompt, handoffDir, resumeCmd, tool, batonCmd, sessionID, extendValue, batonCmd, sessionID,
 	)
 }
 
