@@ -47,6 +47,16 @@ run_installer() {
     "$REPO/install.sh" "$@"
 }
 
+run_uninstaller() {
+  local home="$1"
+  local tools="$2"
+  shift 2
+  HOME="$home" \
+    CODEX_LOG="$home/codex.log" \
+    PATH="$tools:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$REPO/uninstall.sh" "$@"
+}
+
 assert_claude_installed() {
   local home="$1"
   test -L "$home/.claude/skills/baton-pass/SKILL.md" || fail "Claude skill link missing"
@@ -217,6 +227,84 @@ test_codex_skill_conflict_has_no_side_effects() {
   echo "PASS: Codex skill conflict fails before all installation side effects"
 }
 
+test_uninstall_both_is_symmetric_and_idempotent() {
+  local home="$TEST_HOME/uninstall-both"
+  local tools="$home/tools"
+  prepare_home "$home"
+  make_tools "$tools"
+  make_agents "$tools"
+  printf '%s\n' '{"hooks":{"Stop":[{"matcher":"keep","hooks":[{"type":"command","command":"keep-me --flag"}]}]}}' > "$home/.claude/settings.json"
+  printf '%s\n' '{"hooks":{"Stop":[{"matcher":"keep","hooks":[{"type":"command","command":"keep-me --flag"}]}]}}' > "$home/.codex/hooks.json"
+  find "$REPO/handoffs" "$REPO/state" -print | sort > "$home/runtime-paths-before"
+  find "$REPO/handoffs" "$REPO/state" -type f -exec shasum {} \; | sort > "$home/runtime-content-before"
+
+  run_installer "$home" "$tools" >/dev/null
+  run_uninstaller "$home" "$tools" >/dev/null
+
+  test ! -e "$home/.local/bin/baton" || fail "baton command remained after full uninstall"
+  test ! -e "$home/.local/bin/batonresume" || fail "batonresume command remained after full uninstall"
+  test ! -e "$home/.claude/skills/baton-pass/SKILL.md" || fail "Claude skill remained after full uninstall"
+  test ! -e "$home/.agents/skills/baton-pass" || fail "Codex skill remained after full uninstall"
+  ! grep -Fq "$REPO/bin/baton" "$home/.claude/settings.json" || fail "Claude baton Stop hook remained"
+  ! grep -Fq "$REPO/bin/baton" "$home/.codex/hooks.json" || fail "Codex baton Stop hook remained"
+  grep -Fq '"command": "keep-me --flag"' "$home/.claude/settings.json" || fail "unrelated Claude Stop hook changed"
+  grep -Fq '"command": "keep-me --flag"' "$home/.codex/hooks.json" || fail "unrelated Codex Stop hook changed"
+  find "$REPO/handoffs" "$REPO/state" -print | sort > "$home/runtime-paths-after"
+  find "$REPO/handoffs" "$REPO/state" -type f -exec shasum {} \; | sort > "$home/runtime-content-after"
+  cmp -s "$home/runtime-paths-before" "$home/runtime-paths-after" || fail "handoffs/ or state/ paths changed"
+  cmp -s "$home/runtime-content-before" "$home/runtime-content-after" || fail "handoffs/ or state/ contents changed"
+
+  run_uninstaller "$home" "$tools" >/dev/null
+  test ! -e "$home/.local/bin/baton" || fail "second uninstall recreated baton"
+  test ! -e "$home/.agents/skills/baton-pass" || fail "second uninstall recreated Codex skill"
+  echo "PASS: full uninstall is symmetric, preserves unrelated data, and is idempotent"
+}
+
+test_single_agent_uninstall_preserves_shared_commands() {
+  local home="$TEST_HOME/uninstall-single"
+  local tools="$home/tools"
+  prepare_home "$home"
+  make_tools "$tools"
+  make_agents "$tools"
+
+  run_installer "$home" "$tools" >/dev/null
+  run_uninstaller "$home" "$tools" --claude-only >/dev/null
+  test ! -e "$home/.claude/skills/baton-pass/SKILL.md" || fail "Claude skill remained after Claude-only uninstall"
+  test -L "$home/.agents/skills/baton-pass" || fail "Claude-only uninstall removed Codex skill"
+  ! grep -Fq "$REPO/bin/baton" "$home/.claude/settings.json" || fail "Claude hook remained after Claude-only uninstall"
+  grep -Fq "$REPO/bin/baton" "$home/.codex/hooks.json" || fail "Claude-only uninstall removed Codex hook"
+  test -L "$home/.local/bin/baton" || fail "Claude-only uninstall removed shared baton command"
+  test -L "$home/.local/bin/batonresume" || fail "Claude-only uninstall removed shared batonresume command"
+
+  run_uninstaller "$home" "$tools" --codex-only >/dev/null
+  test ! -e "$home/.agents/skills/baton-pass" || fail "Codex skill remained after Codex-only uninstall"
+  ! grep -Fq "$REPO/bin/baton" "$home/.codex/hooks.json" || fail "Codex hook remained after Codex-only uninstall"
+  test ! -e "$home/.local/bin/baton" || fail "shared baton command remained after final agent uninstall"
+  test ! -e "$home/.local/bin/batonresume" || fail "shared batonresume command remained after final agent uninstall"
+  echo "PASS: single-agent uninstall preserves shared commands until the final agent is removed"
+}
+
+test_uninstall_help_and_invalid_flags() {
+  local home="$TEST_HOME/uninstall-options"
+  local tools="$home/tools"
+  local output="$home/output"
+  mkdir -p "$home"
+  make_tools "$tools"
+
+  run_uninstaller "$home" "$tools" --help > "$output"
+  grep -q '^Usage:' "$output" || fail "uninstall --help did not print usage"
+  test ! -e "$home/.local/bin" || fail "uninstall --help modified command links"
+  test ! -e "$home/.claude" || fail "uninstall --help modified Claude configuration"
+  test ! -e "$home/.codex" || fail "uninstall --help modified Codex configuration"
+  if run_uninstaller "$home" "$tools" --unknown >/dev/null 2>&1; then
+    fail "uninstaller accepted an unknown flag"
+  fi
+  if run_uninstaller "$home" "$tools" --claude-only --codex-only >/dev/null 2>&1; then
+    fail "uninstaller accepted mutually exclusive flags"
+  fi
+  echo "PASS: uninstall help has no side effects and invalid flags are rejected"
+}
+
 test_both_commands_detected_without_config_dirs
 test_claude_only
 test_codex_only
@@ -226,6 +314,9 @@ test_invalid_flags
 test_help_has_no_side_effects
 test_codex_skill_conflict_has_no_side_effects
 test_codex_directory_without_executable
+test_uninstall_both_is_symmetric_and_idempotent
+test_single_agent_uninstall_preserves_shared_commands
+test_uninstall_help_and_invalid_flags
 
 PATH="$ORIGINAL_PATH"
 echo "All installer integration tests passed."
