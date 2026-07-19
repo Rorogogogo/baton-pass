@@ -115,21 +115,16 @@ Codex, or Cursor from inside the folder where you want it:
 Install baton-pass for me.
 
 1. Clone https://github.com/Rorogogogo/baton-pass (or tell me where it is).
-2. Run its ./install.sh (builds the `baton` binary, or downloads a prebuilt one).
-3. Add its bin/ directory to my PATH (append to my shell rc).
-4. Register the Stop hook from its settings.example.json into MY agent's config:
-     - Claude Code → ~/.claude/settings.json  (Stop hook)
-     - Codex       → ~/.codex/config.toml      ([hooks], Stop event, codex_hooks=true)
-     - Cursor      → my hooks.json             (stop event)
-5. Symlink its SKILL.md into my skills directory.
-6. Then show me how to use `batonresume`.
+2. Read its README and run `./install.sh`.
+3. Confirm which detected agents were configured and whether Codex needs `/hooks` approval.
+4. Then show me how to use `batonresume`.
 
 Read the repo's README first, confirm the steps, then do it.
 ```
 
 That's the whole point of an agent — it can read this repo and install itself.
 
-### 🟣 Claude Code — first-class (tested)
+### 🟣 Claude Code + 🟢 Codex — one installer
 
 **One command:**
 
@@ -139,11 +134,36 @@ git clone https://github.com/Rorogogogo/baton-pass && cd baton-pass
 ```
 
 `install.sh` builds the single `baton` binary (or downloads a prebuilt one if you
-have no Go toolchain), symlinks the skill and the `baton` / `batonresume` commands onto
-your PATH, and **merges** the Stop hook into your `~/.claude/settings.json` —
-preserving any existing hooks, backing the file up to `settings.json.bak`, and
-skipping if it's already there. Restart Claude Code to load it. Reverse anytime
-with `./uninstall.sh`.
+have no Go toolchain), installs the shared `baton` / `batonresume` commands under
+`~/.local/bin`, and configures **every detected supported agent**. If both Claude
+Code and Codex are installed, one run configures both. Use an explicit selector
+when you only want one:
+
+```sh
+./install.sh --claude-only
+./install.sh --codex-only
+```
+
+The installer creates these agent-specific links and merges the same idempotent
+Stop command into each JSON hook file:
+
+| Agent | Skill | Stop hooks |
+|---|---|---|
+| Claude Code | `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/baton-pass/SKILL.md` | `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` |
+| Codex | `~/.agents/skills/baton-pass` (folder symlink to this repository) | `${CODEX_HOME:-$HOME/.codex}/hooks.json` |
+
+Existing hook files are preserved and backed up beside the original as `.bak`.
+Running the installer again does not duplicate Stop entries. For Codex, the
+installer runs `codex features enable hooks`; if the CLI is not on `PATH`, it
+prints the equivalent `[features]` / `hooks = true` configuration. It deliberately
+does not write a hook trust hash: inspect and approve baton-pass with `/hooks` in
+your next Codex session.
+
+Restart every configured Claude Code or Codex session so it reloads its hooks.
+Reverse the detected installations with `./uninstall.sh`, or select one with
+`./uninstall.sh --claude-only` / `./uninstall.sh --codex-only`. Uninstall removes
+only baton-pass entries and leaves handoffs, state, unrelated hooks, and Codex's
+global hooks feature intact.
 
 > 🪶 **No runtime dependencies.** `baton` is a self-contained Go binary — no Python,
 > Node, or `jq` to install. The only optional dependency is a Go toolchain *at
@@ -151,7 +171,7 @@ with `./uninstall.sh`.
 > prebuilt static binary from Releases.
 
 <details>
-<summary>Prefer to wire it up by hand?</summary>
+<summary>Prefer to inspect the hook shape?</summary>
 
 ```sh
 go build -o bin/baton ./cmd/baton        # or download bin/baton from Releases
@@ -177,16 +197,15 @@ Then add to `~/.claude/settings.json` (see `settings.example.json`):
 ```
 </details>
 
-### 🟢 OpenAI Codex CLI — first-class (needs the hooks flag)
+### Codex behavior
 
-Codex has a compatible `Stop` hook (experimental). Enable it and register
-`baton check` on the Stop event in `~/.codex/hooks.json` (and turn the feature on in
-`~/.codex/config.toml`):
+Codex hooks use `~/.codex/hooks.json`, while the feature switch in
+`~/.codex/config.toml` is:
 
 ```toml
 # ~/.codex/config.toml
 [features]
-codex_hooks = true
+hooks = true
 ```
 
 ```json
@@ -201,10 +220,12 @@ codex_hooks = true
 }
 ```
 
-> ✅ **Auto-trigger works on Codex too.** Codex's Stop payload uses the same
-> fields as Claude (`session_id`, `transcript_path`, `cwd`, `stop_hook_active`)
-> and also honors `decision: "block"` + `additionalContext`. `baton check` reads
-> Codex's rollout `token_count` events natively (it uses
+> ✅ **Auto-trigger works on Codex too.** `baton check` returns Codex's supported
+> Stop response: `decision: "block"` with the four choices in `reason`; it does
+> not emit Claude's `hookSpecificOutput.additionalContext`. Claude Code receives
+> its native option-picker instructions, while Codex Default mode receives a
+> normal four-choice prompt. `baton check` reads Codex rollout `token_count`
+> events natively (it uses
 > `info.last_token_usage.input_tokens` as the live context size), so the same
 > binary drives the full watch → handoff → `batonresume codex` loop. Tip: Codex
 > windows are larger than 200K, so bump `BATON_THRESHOLD` to suit.

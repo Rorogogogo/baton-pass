@@ -112,21 +112,16 @@ Claude Code、Codex 或 Cursor：
 帮我安装 baton-pass。
 
 1. 克隆 https://github.com/Rorogogogo/baton-pass（或告诉我它在哪）。
-2. 运行它的 ./install.sh（构建 `baton` 二进制，或下载预编译版）。
-3. 把它的 bin/ 目录加入我的 PATH（追加到我的 shell rc）。
-4. 把它 settings.example.json 里的 Stop 钩子注册到「我的」agent 配置中：
-     - Claude Code → ~/.claude/settings.json  （Stop 钩子）
-     - Codex       → ~/.codex/config.toml      （[hooks]，Stop 事件，codex_hooks=true）
-     - Cursor      → 我的 hooks.json            （stop 事件）
-5. 把它的 SKILL.md 软链接到我的 skills 目录。
-6. 然后告诉我怎么用 `batonresume`。
+2. 阅读 README，然后运行 `./install.sh`。
+3. 确认检测到并配置了哪些 agent，以及 Codex 是否需要通过 `/hooks` 批准。
+4. 然后告诉我怎么用 `batonresume`。
 
 先读这个仓库的 README，确认步骤，然后再执行。
 ```
 
 这正是 agent 存在的意义——它能读这个仓库并自我安装。
 
-### 🟣 Claude Code —— 一等公民（已测试）
+### 🟣 Claude Code + 🟢 Codex —— 同一个安装器
 
 **一条命令：**
 
@@ -136,17 +131,38 @@ git clone https://github.com/Rorogogogo/baton-pass && cd baton-pass
 ```
 
 `install.sh` 会构建单一的 `baton` 二进制（若你没有 Go 工具链，则下载预编译版），
-把技能以及 `baton` / `batonresume` 命令软链接到你的 PATH 上，并把 Stop 钩子
-**合并**进你的 `~/.claude/settings.json`——保留所有已有钩子，把文件备份到
-`settings.json.bak`，若已存在则跳过。重启 Claude Code 加载它。随时可用
-`./uninstall.sh` 撤销。
+把共享的 `baton` / `batonresume` 命令安装到 `~/.local/bin`，并配置**所有检测到的
+受支持 agent**。如果 Claude Code 和 Codex 都已安装，一次运行会同时配置两者。
+只想配置其中一个时使用显式参数：
+
+```sh
+./install.sh --claude-only
+./install.sh --codex-only
+```
+
+安装器会创建以下 agent 专用链接，并把同一个幂等 Stop 命令合并到对应 JSON 钩子文件：
+
+| Agent | 技能 | Stop 钩子 |
+|---|---|---|
+| Claude Code | `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/baton-pass/SKILL.md` | `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` |
+| Codex | `~/.agents/skills/baton-pass`（指向本仓库的文件夹软链接） | `${CODEX_HOME:-$HOME/.codex}/hooks.json` |
+
+已有钩子会保留，并在原文件旁备份为 `.bak`；再次运行不会重复添加 Stop 条目。
+对于 Codex，安装器会运行 `codex features enable hooks`。如果 `PATH` 中找不到 CLI，
+它会打印等价的 `[features]` / `hooks = true` 配置。安装器不会静默写入钩子信任哈希；
+请在下一个 Codex 会话中用 `/hooks` 检查并批准 baton-pass。
+
+请重启所有已配置的 Claude Code 或 Codex 会话以重新加载钩子。运行 `./uninstall.sh`
+可撤销检测到的安装，也可用 `./uninstall.sh --claude-only` 或
+`./uninstall.sh --codex-only` 只移除一个。卸载只删除 baton-pass 条目，会保留交接文档、
+状态、无关钩子以及 Codex 的全局 hooks 特性。
 
 > 🪶 **没有运行时依赖。** `baton` 是一个自包含的 Go 二进制——不需要 Python、
 > Node 或 `jq`。唯一的可选依赖是*安装时*的 Go 工具链，用来从源码构建；没有它，
 > `install.sh` 会从 Releases 下载一个预编译的静态二进制。
 
 <details>
-<summary>想手动接线？</summary>
+<summary>想检查钩子结构？</summary>
 
 ```sh
 go build -o bin/baton ./cmd/baton        # 或从 Releases 下载 bin/baton
@@ -172,15 +188,14 @@ ln -s "$PWD/SKILL.md" ~/.claude/skills/baton-pass/SKILL.md
 ```
 </details>
 
-### 🟢 OpenAI Codex CLI —— 一等公民（需要钩子开关）
+### Codex 行为
 
-Codex 有兼容的 `Stop` 钩子（实验性）。在 `~/.codex/hooks.json` 里把
-`baton check` 注册到 Stop 事件上（并在 `~/.codex/config.toml` 里开启该特性）：
+Codex 钩子位于 `~/.codex/hooks.json`，而 `~/.codex/config.toml` 中的特性开关是：
 
 ```toml
 # ~/.codex/config.toml
 [features]
-codex_hooks = true
+hooks = true
 ```
 
 ```json
@@ -195,10 +210,11 @@ codex_hooks = true
 }
 ```
 
-> ✅ **自动触发在 Codex 上同样有效。** Codex 的 Stop 负载使用与 Claude 相同的
-> 字段（`session_id`、`transcript_path`、`cwd`、`stop_hook_active`），也同样
-> 支持 `decision: "block"` + `additionalContext`。`baton check` 原生读取 Codex
-> 的 rollout `token_count` 事件（用 `info.last_token_usage.input_tokens` 作为
+> ✅ **自动触发在 Codex 上同样有效。** `baton check` 返回 Codex 支持的 Stop
+> 响应：`decision: "block"`，四个选项放在 `reason` 中；不会输出 Claude 的
+> `hookSpecificOutput.additionalContext`。Claude Code 会收到原生选项选择器指令，
+> 而 Codex Default 模式会收到普通的四选一提示。`baton check` 原生读取 Codex
+> rollout `token_count` 事件（用 `info.last_token_usage.input_tokens` 作为
 > 实时上下文体积），所以同一个二进制驱动完整的 监控 → 交接 → `batonresume codex`
 > 流程。提示：Codex 的窗口大于 200K，记得相应调高 `BATON_THRESHOLD`。
 
