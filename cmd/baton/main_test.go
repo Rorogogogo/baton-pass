@@ -5,6 +5,46 @@ import (
 	"testing"
 )
 
+func TestFilterBatonHooksPreservesOtherCommandsInMixedGroup(t *testing.T) {
+	stop := []any{
+		map[string]any{
+			"matcher": "mixed-group",
+			"timeout": float64(30),
+			"hooks": []any{
+				map[string]any{"type": "command", "command": `"/tmp/baton" check`},
+				map[string]any{"type": "command", "command": "keep-me --flag", "timeout": float64(5)},
+			},
+		},
+		map[string]any{
+			"matcher": "baton-only",
+			"hooks":   []any{map[string]any{"type": "command", "command": "/tmp/baton check"}},
+		},
+	}
+
+	got, removed := filterBatonHooks(stop)
+	if !removed {
+		t.Fatal("filterBatonHooks reported no removal")
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(filtered Stop groups) = %d, want 1", len(got))
+	}
+	group, ok := got[0].(map[string]any)
+	if !ok {
+		t.Fatalf("filtered group type = %T, want map[string]any", got[0])
+	}
+	if group["matcher"] != "mixed-group" || group["timeout"] != float64(30) {
+		t.Fatalf("group metadata changed: %#v", group)
+	}
+	hooks, ok := group["hooks"].([]any)
+	if !ok || len(hooks) != 1 {
+		t.Fatalf("remaining hooks = %#v, want one unrelated hook", group["hooks"])
+	}
+	hook := hooks[0].(map[string]any)
+	if hook["command"] != "keep-me --flag" || hook["timeout"] != float64(5) {
+		t.Fatalf("unrelated hook changed: %#v", hook)
+	}
+}
+
 func TestBuildHookOutputUsesCodexStopSchema(t *testing.T) {
 	got := buildHookOutput("codex", "threshold reached", "present the options")
 

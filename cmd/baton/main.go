@@ -397,13 +397,8 @@ func hookSettings(action string, args []string) {
 		writeSettings(settingsPath, data)
 		fmt.Printf("  ✓ Stop hook registered (backup: %s.bak)\n", filepath.Base(settingsPath))
 	case "uninstall-hook":
-		kept := make([]any, 0, len(stop))
-		for _, grp := range stop {
-			if !groupHasHook(grp) {
-				kept = append(kept, grp)
-			}
-		}
-		if len(kept) == len(stop) {
+		kept, removed := filterBatonHooks(stop)
+		if !removed {
 			fmt.Println("  ✓ no Stop hook entry found")
 			return
 		}
@@ -449,25 +444,71 @@ func groupHasHook(grp any) bool {
 	}
 	hooks, _ := g["hooks"].([]any)
 	for _, h := range hooks {
-		hm, _ := h.(map[string]any)
-		if hm == nil {
-			continue
-		}
-		cmd, _ := hm["command"].(string)
-		// Strip quotes first so we match whether or not the path was quoted
-		// (quoting is required when the install path contains spaces).
-		cmd = strings.ReplaceAll(cmd, `"`, "")
-		// Match the new Go binary (`baton check` / …/baton) plus legacy installs
-		// (the old `hb` binary and the original python hook) so uninstall migrates.
-		if strings.Contains(cmd, "baton check") ||
-			strings.Contains(cmd, "/baton ") ||
-			strings.Contains(cmd, "handoff_baton_check.py") ||
-			strings.Contains(cmd, "hb check") ||
-			strings.HasSuffix(cmd, "/hb") {
+		if isBatonHook(h) {
 			return true
 		}
 	}
 	return false
+}
+
+func filterBatonHooks(stop []any) ([]any, bool) {
+	keptGroups := make([]any, 0, len(stop))
+	removed := false
+	for _, grp := range stop {
+		group, ok := grp.(map[string]any)
+		if !ok {
+			keptGroups = append(keptGroups, grp)
+			continue
+		}
+		hooks, ok := group["hooks"].([]any)
+		if !ok {
+			keptGroups = append(keptGroups, grp)
+			continue
+		}
+
+		keptHooks := make([]any, 0, len(hooks))
+		groupChanged := false
+		for _, hook := range hooks {
+			if isBatonHook(hook) {
+				removed = true
+				groupChanged = true
+				continue
+			}
+			keptHooks = append(keptHooks, hook)
+		}
+		if !groupChanged {
+			keptGroups = append(keptGroups, grp)
+			continue
+		}
+		if len(keptHooks) == 0 {
+			continue
+		}
+		keptGroup := make(map[string]any, len(group))
+		for key, value := range group {
+			keptGroup[key] = value
+		}
+		keptGroup["hooks"] = keptHooks
+		keptGroups = append(keptGroups, keptGroup)
+	}
+	return keptGroups, removed
+}
+
+func isBatonHook(hook any) bool {
+	hm, _ := hook.(map[string]any)
+	if hm == nil {
+		return false
+	}
+	cmd, _ := hm["command"].(string)
+	// Strip quotes first so we match whether or not the path was quoted
+	// (quoting is required when the install path contains spaces).
+	cmd = strings.ReplaceAll(cmd, `"`, "")
+	// Match the new Go binary (`baton check` / …/baton) plus legacy installs
+	// (the old `hb` binary and the original python hook) so uninstall migrates.
+	return strings.Contains(cmd, "baton check") ||
+		strings.Contains(cmd, "/baton ") ||
+		strings.Contains(cmd, "handoff_baton_check.py") ||
+		strings.Contains(cmd, "hb check") ||
+		strings.HasSuffix(cmd, "/hb")
 }
 
 func backup(path string) {
