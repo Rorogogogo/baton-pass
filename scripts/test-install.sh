@@ -67,17 +67,17 @@ assert_codex_installed() {
   test "$(cat "$home/codex.log")" = "features enable hooks" || fail "Codex hooks feature invocation is wrong"
 }
 
-test_both_detected() {
-  local home="$TEST_HOME/both"
+test_both_commands_detected_without_config_dirs() {
+  local home="$TEST_HOME/both-commands"
   local tools="$home/tools"
-  prepare_home "$home"
+  mkdir -p "$home"
   make_tools "$tools"
   make_agents "$tools"
 
   run_installer "$home" "$tools" >/dev/null
   assert_claude_installed "$home"
   assert_codex_installed "$home"
-  echo "PASS: both detected agents are configured"
+  echo "PASS: command-only detection configures both agents and creates hook parents"
 }
 
 test_claude_only() {
@@ -185,7 +185,8 @@ test_codex_directory_without_executable() {
   cp "$home/.codex/hooks.json" "$home/codex-directory-hook-before.json"
   "$REPO/bin/baton" install-hook "$home/.codex/hooks.json" >/dev/null
   cmp -s "$home/codex-directory-hook-before.json" "$home/.codex/hooks.json" || fail "directory-detected Codex Stop hook missing"
-  grep -Fq '[features] hooks = true' "$output" || fail "manual Codex hooks instruction missing"
+  grep -Fq "$home/.codex/config.toml" "$output" || fail "manual Codex config path missing"
+  awk '/^\[features\]$/{getline; if ($0 == "hooks = true") found=1} END{exit !found}' "$output" || fail "manual Codex hooks TOML is not pasteable"
   test ! -e "$home/.codex/config.toml" || fail "installer wrote Codex feature or trust configuration"
   if grep -qi 'trust' "$home/.codex/hooks.json"; then
     fail "installer wrote a Codex trust hash"
@@ -193,13 +194,37 @@ test_codex_directory_without_executable() {
   echo "PASS: Codex directory detection prints manual hooks guidance without trust writes"
 }
 
-test_both_detected
+test_codex_skill_conflict_has_no_side_effects() {
+  local home="$TEST_HOME/codex-conflict"
+  local tools="$home/tools"
+  local output="$home/output"
+  prepare_home "$home"
+  mkdir -p "$home/.agents/skills/baton-pass"
+  make_tools "$tools"
+  make_agents "$tools"
+
+  if run_installer "$home" "$tools" >"$output" 2>&1; then
+    fail "installer succeeded despite a conflicting Codex skill directory"
+  fi
+  grep -Fq "$home/.agents/skills/baton-pass" "$output" || fail "Codex conflict error does not identify the destination"
+  test ! -e "$home/.local/bin" || fail "Codex conflict created shared command links"
+  test ! -e "$home/.claude/skills/baton-pass" || fail "Codex conflict installed the Claude skill"
+  test "$(cat "$home/.claude/settings.json")" = '{}' || fail "Codex conflict changed Claude hooks"
+  test "$(cat "$home/.codex/hooks.json")" = '{}' || fail "Codex conflict changed Codex hooks"
+  test ! -e "$home/.claude/settings.json.bak" || fail "Codex conflict backed up Claude hooks"
+  test ! -e "$home/.codex/hooks.json.bak" || fail "Codex conflict backed up Codex hooks"
+  test ! -e "$home/codex.log" || fail "Codex conflict invoked the Codex CLI"
+  echo "PASS: Codex skill conflict fails before all installation side effects"
+}
+
+test_both_commands_detected_without_config_dirs
 test_claude_only
 test_codex_only
 test_neither_detected
 test_second_install_is_idempotent
 test_invalid_flags
 test_help_has_no_side_effects
+test_codex_skill_conflict_has_no_side_effects
 test_codex_directory_without_executable
 
 PATH="$ORIGINAL_PATH"

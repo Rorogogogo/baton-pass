@@ -12,6 +12,7 @@ CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 BIN_DIR="$HOME/.local/bin"
 SLUG="Rorogogogo/baton-pass"
 BATON="$REPO/bin/baton"
+CODEX_SKILL="$HOME/.agents/skills/baton-pass"
 
 usage() {
   cat <<'EOF'
@@ -73,6 +74,12 @@ case "$#" in
     ;;
 esac
 
+# Validate selected destinations before building or modifying any installation.
+if [[ "$SELECT_CODEX" == true && -e "$CODEX_SKILL" && ! -L "$CODEX_SKILL" ]]; then
+  echo "ERROR: Codex skill destination exists and is not a symlink: $CODEX_SKILL" >&2
+  exit 1
+fi
+
 echo "Installing baton-pass from: $REPO"
 
 # 1. obtain the baton binary --------------------------------------------------
@@ -113,12 +120,7 @@ if [[ "$SELECT_CLAUDE" == true ]]; then
 fi
 
 if [[ "$SELECT_CODEX" == true ]]; then
-  CODEX_SKILL="$HOME/.agents/skills/baton-pass"
   mkdir -p "$(dirname "$CODEX_SKILL")"
-  if [[ -e "$CODEX_SKILL" && ! -L "$CODEX_SKILL" ]]; then
-    echo "ERROR: Codex skill destination exists and is not a symlink: $CODEX_SKILL" >&2
-    exit 1
-  fi
   ln -sfn "$REPO" "$CODEX_SKILL"
   echo "  ✓ Codex skill → $CODEX_SKILL"
   "$BATON" install-hook "$CODEX_DIR/hooks.json"
@@ -127,7 +129,9 @@ if [[ "$SELECT_CODEX" == true ]]; then
     codex features enable hooks
     echo "  ✓ Codex hooks feature enabled"
   else
-    echo "  ! Codex CLI not found; enable hooks manually in $CODEX_DIR/config.toml: [features] hooks = true"
+    echo "  ! Codex CLI not found; add this to $CODEX_DIR/config.toml:"
+    echo "[features]"
+    echo "hooks = true"
   fi
   echo "  ! Inspect and approve the baton-pass hook with /hooks in your next Codex session."
 fi
