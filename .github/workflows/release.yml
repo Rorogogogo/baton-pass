@@ -3,10 +3,18 @@ name: release
 # Cross-compiles the baton binary and attaches the assets to the GitHub Release
 # whenever a tag like v1.2.3 is pushed. install.sh downloads these when the
 # user has no Go toolchain.
+#
+# Can also be run by hand from the Actions tab (Run workflow → enter a version),
+# which creates the tag as well — handy for cutting the first release.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to create and release, e.g. v0.1.0"
+        required: true
 
 permissions:
   contents: write
@@ -24,4 +32,6 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
+          # On a tag push the ref supplies the tag; a manual run names it.
+          tag_name: ${{ inputs.version || github.ref_name }}
           files: dist/baton_*
