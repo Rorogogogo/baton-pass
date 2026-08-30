@@ -2,14 +2,14 @@
 
 # 🏃 baton-pass
 
-**Pass the baton before your context runs out of breath.**
+**Preserve progress before context or usage limits interrupt the work.**
 
 **English** | [简体中文](./README.zh-CN.md)
 
-A Stop-hook + skill that watches your agent's context size and, when it gets
-expensive, hands the work off to a *fresh* session — so you stop paying to
-re-send a giant transcript on every single turn. It's a single dependency-free
-**Go** binary — no Python, Node, or `jq` to install.
+A local continuity tool with optional context and Claude 5-hour quota guards.
+At a safe boundary it reuses the same `baton-pass` skill to hand work to a
+*fresh* session. It is one dependency-free **Go** binary—no Python, Node, `jq`,
+network service, daemon, or Notchy dependency.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Built with Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)
@@ -31,9 +31,17 @@ As a session grows, two bad things happen:
 2. **Auto-compaction kicks in.** Near the window limit your agent silently
    compacts the history into a lossy summary you didn't write and can't review.
 
-`baton-pass` fixes both. When you cross a threshold, it offers to write a
-clean **handoff document** and restart in a fresh session seeded with just that
-doc — resetting your context from *huge* back to *tiny*.
+`baton-pass` fixes both and can also hand off before Claude Code's real 5-hour
+usage window is exhausted. Context, quota, and manual handoff are independent:
+
+```text
+Context guard ─┐
+Quota guard   ─┼─→ baton-pass skill → handoff document → batonresume
+Manual request ┘
+```
+
+The runtime decides **when**; the existing skill decides **how**. No second
+quota-specific handoff system is introduced.
 
 > 🏁 Think of a relay race: each session runs its leg, then passes the baton
 > (the handoff doc) to a fresh runner instead of dragging the whole track behind it.
@@ -67,16 +75,19 @@ lossy auto-summary.
 ## ⚙️ How it works
 
 ```
-Stop hook (after every turn)
-  ├─ read context size + this session's threshold   (free — just reads the transcript)
-  ├─ disabled for this session?  → do nothing
-  ├─ under threshold?            → do nothing
-  └─ over threshold? → one-line notice + a native ↑/↓ picker:
-        1. Handoff now            → write handoff doc, then: exit + `batonresume`
-        2. Extend +10K            → bump this session's threshold, continue
-        3. Disable this convo     → stop asking this session, continue
-        4. Skip                   → continue, ask again next turn
+Claude statusline JSON → silent local usage writer → usage.json
+                                                   ↓
+Claude hooks / Codex Stop hook → baton policy engine
+  ├─ context guard enabled and threshold reached?
+  ├─ Claude quota guard enabled and fresh telemetry reached threshold?
+  └─ trigger once at a safe boundary → existing baton-pass skill
 ```
+
+Claude quota checks run at `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and
+`Stop`. Healthy checks produce no output and add zero context. `PostToolUse` is
+the primary handoff boundary; `PreToolUse` prevents starting another phase;
+`Stop` remains the context guard and quota fallback. Missing, malformed, stale,
+or expired telemetry always fails open.
 
 After "Handoff now":  exit the session (/exit), then run `batonresume` → a fresh
 session seeded with the handoff doc as its opening prompt. The agent
@@ -115,21 +126,16 @@ Codex, or Cursor from inside the folder where you want it:
 Install baton-pass for me.
 
 1. Clone https://github.com/Rorogogogo/baton-pass (or tell me where it is).
-2. Run its ./install.sh (builds the `baton` binary, or downloads a prebuilt one).
-3. Add its bin/ directory to my PATH (append to my shell rc).
-4. Register the Stop hook from its settings.example.json into MY agent's config:
-     - Claude Code → ~/.claude/settings.json  (Stop hook)
-     - Codex       → ~/.codex/config.toml      ([hooks], Stop event, codex_hooks=true)
-     - Cursor      → my hooks.json             (stop event)
-5. Symlink its SKILL.md into my skills directory.
-6. Then show me how to use `batonresume`.
+2. Read its README and run `./install.sh`.
+3. Confirm which detected agents were configured and whether Codex needs `/hooks` approval.
+4. Then show me how to use `batonresume`.
 
 Read the repo's README first, confirm the steps, then do it.
 ```
 
 That's the whole point of an agent — it can read this repo and install itself.
 
-### 🟣 Claude Code — first-class (tested)
+### 🟣 Claude Code + 🟢 Codex — one installer
 
 **One command:**
 
@@ -139,11 +145,48 @@ git clone https://github.com/Rorogogogo/baton-pass && cd baton-pass
 ```
 
 `install.sh` builds the single `baton` binary (or downloads a prebuilt one if you
-have no Go toolchain), symlinks the skill and the `baton` / `batonresume` commands onto
-your PATH, and **merges** the Stop hook into your `~/.claude/settings.json` —
-preserving any existing hooks, backing the file up to `settings.json.bak`, and
-skipping if it's already there. Restart Claude Code to load it. Reverse anytime
-with `./uninstall.sh`.
+have no Go toolchain), installs the shared `baton` / `batonresume` commands under
+`~/.local/bin`, and configures **every detected supported agent**. If both Claude
+Code and Codex are installed, one run configures both. Use an explicit selector
+when you only want one:
+
+```sh
+./install.sh --claude-only
+./install.sh --codex-only
+
+# Non-interactive quota-only setup
+./install.sh --claude-only --quota --no-context --quota-threshold 92
+```
+
+On a fresh interactive install, Baton asks whether to watch 5-hour quota,
+context size, both, or neither. The recommended fresh setup is quota-only with
+a balanced 92% handoff threshold. Existing installations migrate to context-on
+and quota-off, so upgrading never silently enables a new quota trigger.
+
+The installer creates these agent-specific links and merges idempotent hooks:
+
+| Agent | Skill | Stop hooks |
+|---|---|---|
+| Claude Code | `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/baton-pass/SKILL.md` | Prompt, pre-tool, post-tool, and Stop in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` |
+| Codex | `~/.agents/skills/baton-pass` (folder symlink to this repository) | Stop only in `${CODEX_HOME:-$HOME/.codex}/hooks.json` |
+
+When quota is enabled, the installer wraps Claude's existing `statusLine`
+command. Baton extracts only numeric rate-limit fields, then runs the original
+command with the original JSON and preserves its output and settings metadata.
+Reruns do not nest wrappers; uninstall restores the exact prior command.
+
+Existing hook files are preserved and backed up beside the original as `.bak`.
+Running the installer again does not duplicate Stop entries. For Codex, the
+installer runs `codex features enable hooks`; if the CLI is not on `PATH`, it
+prints the equivalent `[features]` / `hooks = true` configuration. It deliberately
+does not write a hook trust hash: inspect and approve baton-pass with `/hooks` in
+your next Codex session.
+
+Restart every configured Claude Code or Codex session so it reloads its hooks.
+Reverse the detected installations with `./uninstall.sh`, or select one with
+`./uninstall.sh --claude-only` / `./uninstall.sh --codex-only`. Uninstall removes
+only baton-pass entries and leaves handoffs, state, unrelated hooks, and Codex's
+global hooks feature intact.
 
 > 🪶 **No runtime dependencies.** `baton` is a self-contained Go binary — no Python,
 > Node, or `jq` to install. The only optional dependency is a Go toolchain *at
@@ -151,7 +194,7 @@ with `./uninstall.sh`.
 > prebuilt static binary from Releases.
 
 <details>
-<summary>Prefer to wire it up by hand?</summary>
+<summary>Prefer to inspect the hook shape?</summary>
 
 ```sh
 go build -o bin/baton ./cmd/baton        # or download bin/baton from Releases
@@ -161,7 +204,9 @@ mkdir -p ~/.claude/skills/baton-pass
 ln -s "$PWD/SKILL.md" ~/.claude/skills/baton-pass/SKILL.md
 ```
 
-Then add to `~/.claude/settings.json` (see `settings.example.json`):
+Then add to `~/.claude/settings.json` (see `settings.example.json`). The
+installer is preferred because it safely merges lifecycle hooks and statusline
+telemetry without replacing unrelated settings.
 
 ```json
 {
@@ -177,16 +222,15 @@ Then add to `~/.claude/settings.json` (see `settings.example.json`):
 ```
 </details>
 
-### 🟢 OpenAI Codex CLI — first-class (needs the hooks flag)
+### Codex behavior
 
-Codex has a compatible `Stop` hook (experimental). Enable it and register
-`baton check` on the Stop event in `~/.codex/hooks.json` (and turn the feature on in
-`~/.codex/config.toml`):
+Codex hooks use `~/.codex/hooks.json`, while the feature switch in
+`~/.codex/config.toml` is:
 
 ```toml
 # ~/.codex/config.toml
 [features]
-codex_hooks = true
+hooks = true
 ```
 
 ```json
@@ -201,10 +245,12 @@ codex_hooks = true
 }
 ```
 
-> ✅ **Auto-trigger works on Codex too.** Codex's Stop payload uses the same
-> fields as Claude (`session_id`, `transcript_path`, `cwd`, `stop_hook_active`)
-> and also honors `decision: "block"` + `additionalContext`. `baton check` reads
-> Codex's rollout `token_count` events natively (it uses
+> ✅ **Auto-trigger works on Codex too.** `baton check` returns Codex's supported
+> Stop response: `decision: "block"` with the four choices in `reason`; it does
+> not emit Claude's `hookSpecificOutput.additionalContext`. Claude Code receives
+> its native option-picker instructions, while Codex Default mode receives a
+> normal four-choice prompt. `baton check` reads Codex rollout `token_count`
+> events natively (it uses
 > `info.last_token_usage.input_tokens` as the live context size), so the same
 > binary drives the full watch → handoff → `batonresume codex` loop. Tip: Codex
 > windows are larger than 200K, so bump `BATON_THRESHOLD` to suit.
@@ -234,7 +280,24 @@ heavy.
 
 ## 🔧 Configuration
 
-Set via env vars (in your shell, or on the hook command):
+Persistent configuration lives in `<data>/config.json`. Use:
+
+```sh
+baton status
+baton config
+baton enable quota
+baton disable quota
+baton enable context
+baton disable context
+baton config quota 92
+baton config context 190000
+```
+
+The default quota levels are aware 75%, caution 85%, handoff 92%, and emergency
+96%. Only the handoff threshold is exposed by the short non-interactive command;
+the JSON remains intentionally small and inspectable.
+
+Environment overrides retained for compatibility:
 
 | Variable                    | Default      | Meaning                                                          |
 | --------------------------- | ------------ | ---------------------------------------------------------------- |
@@ -248,13 +311,15 @@ Set via env vars (in your shell, or on the hook command):
 ## 📂 Data layout
 
 ```
-handoffs/<project-name>/handoff-<YYYYMMDD-HHMM>.md   # one per handoff, kept for history
-state/<session_id>.json                              # { threshold_override, disabled }
+config.json                                          # independent guard configuration
+usage.json                                           # numeric Claude quota telemetry only
+handoffs/<project-name>/handoff-<YYYYMMDD-HHMM>.md  # one per handoff, kept for history
+state/<session_id>.json                              # overrides and quota-window deduplication
 ```
 
 `<project-name>` is the working directory's basename, so handoffs from different
-projects stay separate and auditable. Both folders are git-ignored — local
-runtime data, never committed.
+projects stay separate and auditable. These runtime paths are git-ignored and
+never committed.
 
 > Locally, `BATON_DATA` defaults to this repo folder so everything lives
 > in one place. If you install to a read-only/managed location, point it at a
@@ -268,9 +333,12 @@ runtime data, never committed.
 | ------- | ------------ |
 | `batonresume [claude\|codex] [project\|file]` | Relaunch into a fresh session from a handoff. With no second arg: newest for the current folder, else newest overall. Pass a project name (from anywhere) or a file path to target one. `batonresume --list` shows all. Run it after you exit the old session. |
 | `baton extend <session_id> <value>` | Raise a session's threshold. |
-| `baton disable <session_id>` | Silence baton-pass for a session. |
+| `baton disable <session_id>` | Silence all automatic guards for a session. |
 | `baton reset <session_id>` | Clear a session's state. |
-| `baton check` | The Stop hook itself (reads the hook payload on stdin); you don't call this by hand. |
+| `baton status` | Show enabled guards and fresh Claude 5-hour usage, or `unavailable`. |
+| `baton enable/disable context/ quota` | Independently toggle automatic guards. |
+| `baton config` | Interactive persistent configuration. |
+| `baton check` | Lifecycle hook entry point; you don't normally call this by hand. |
 
 ---
 

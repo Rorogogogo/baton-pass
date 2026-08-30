@@ -1,11 +1,41 @@
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/ABSOLUTE/PATH/TO/baton-pass/bin/baton\" check --event prompt --agent claude"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/ABSOLUTE/PATH/TO/baton-pass/bin/baton\" check --event pre-tool --agent claude"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/ABSOLUTE/PATH/TO/baton-pass/bin/baton\" check --event post-tool --agent claude"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "\"/ABSOLUTE/PATH/TO/baton-pass/bin/baton\" check"
+            "command": "\"/ABSOLUTE/PATH/TO/baton-pass/bin/baton\" check --event stop --agent claude"
           }
         ]
       }

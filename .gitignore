@@ -1,6 +1,8 @@
 # Runtime data — kept locally for history/audit, never committed.
 /state/
 /handoffs/
+/config.json
+/usage.json
 
 # Built / downloaded binary (produced by install.sh or scripts/build-release.sh)
 /bin/baton
