@@ -102,14 +102,17 @@ echo "Uninstalling baton-pass..."
 if [[ "$SELECT_CLAUDE" == true ]]; then
   remove_owned_link "$CLAUDE_SKILL" "$REPO/SKILL.md"
   rmdir "$CLAUDE_DIR/skills/baton-pass" 2>/dev/null || true
+  if [[ -f "$CLAUDE_HOOKS" && -x "$BATON" ]]; then
+    "$BATON" uninstall-statusline "$CLAUDE_HOOKS"
+  fi
   remove_hook "$CLAUDE_HOOKS"
-  echo "  ✓ removed Claude skill and Stop hook"
+  echo "  ✓ removed Claude skill, hooks, and quota telemetry"
 fi
 
 if [[ "$SELECT_CODEX" == true ]]; then
   remove_owned_link "$CODEX_SKILL" "$REPO"
   remove_hook "$CODEX_HOOKS"
-  echo "  ✓ removed Codex skill and Stop hook"
+  echo "  ✓ removed Codex skill and hooks"
 fi
 
 # The command links are shared by both agents. Leave them in place if an

@@ -42,6 +42,7 @@ run_installer() {
   local tools="$2"
   shift 2
   HOME="$home" \
+    BATON_DATA="$home/.baton" \
     CODEX_LOG="$home/codex.log" \
     PATH="$tools:/usr/bin:/bin:/usr/sbin:/sbin" \
     "$REPO/install.sh" "$@"
@@ -52,6 +53,7 @@ run_uninstaller() {
   local tools="$2"
   shift 2
   HOME="$home" \
+    BATON_DATA="$home/.baton" \
     CODEX_LOG="$home/codex.log" \
     PATH="$tools:/usr/bin:/bin:/usr/sbin:/sbin" \
     "$REPO/uninstall.sh" "$@"
@@ -309,6 +311,61 @@ test_uninstall_help_and_invalid_flags() {
   echo "PASS: uninstall help has no side effects and invalid flags are rejected"
 }
 
+test_quota_only_flags_install_all_claude_hooks_and_telemetry() {
+  local home="$TEST_HOME/quota-only"
+  local tools="$home/tools"
+  prepare_home "$home"
+  make_tools "$tools"
+  make_agents "$tools"
+
+  run_installer "$home" "$tools" --claude-only --quota --no-context --quota-threshold 92 >/dev/null
+  grep -Fq '"enabled": true' "$home/.baton/config.json" || fail "quota-only config did not enable quota"
+  grep -Fq '"threshold_tokens": 190000' "$home/.baton/config.json" || fail "quota-only config missing context threshold"
+  for event in UserPromptSubmit PreToolUse PostToolUse Stop; do
+    grep -Fq "\"$event\"" "$home/.claude/settings.json" || fail "Claude $event hook missing"
+  done
+  grep -Fq 'statusline' "$home/.claude/settings.json" || fail "quota telemetry status line missing"
+  echo "PASS: quota-only flags install independent quota config, lifecycle hooks, and telemetry"
+}
+
+test_existing_statusline_is_preserved_idempotently_and_restored() {
+  local home="$TEST_HOME/statusline-preserved"
+  local tools="$home/tools"
+  prepare_home "$home"
+  make_tools "$tools"
+  make_agents "$tools"
+  printf '%s\n' '{"statusLine":{"type":"command","command":"my-status --color blue","padding":2}}' > "$home/.claude/settings.json"
+
+  run_installer "$home" "$tools" --claude-only --quota --no-context >/dev/null
+  grep -Fq -- '--passthrough' "$home/.claude/settings.json" || fail "existing status line was not wrapped"
+  grep -Fq '"padding": 2' "$home/.claude/settings.json" || fail "status line metadata changed"
+  cp "$home/.claude/settings.json" "$home/statusline-first.json"
+  run_installer "$home" "$tools" --claude-only >/dev/null
+  cmp -s "$home/statusline-first.json" "$home/.claude/settings.json" || fail "installer duplicated or changed Baton status line"
+
+  run_uninstaller "$home" "$tools" --claude-only >/dev/null
+  grep -Fq '"command": "my-status --color blue"' "$home/.claude/settings.json" || fail "previous status line was not restored"
+  grep -Fq '"padding": 2' "$home/.claude/settings.json" || fail "restored status line lost metadata"
+  echo "PASS: existing status line survives install, rerun, and uninstall"
+}
+
+test_existing_install_migrates_without_enabling_quota() {
+  local home="$TEST_HOME/legacy-migration"
+  local tools="$home/tools"
+  prepare_home "$home"
+  make_tools "$tools"
+  make_agents "$tools"
+  printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\\\"%s/bin/baton\\\" check"}]}]}}\n' "$REPO" > "$home/.claude/settings.json"
+
+  run_installer "$home" "$tools" --claude-only >/dev/null
+  test ! -f "$home/.baton/config.json" || fail "legacy migration unexpectedly wrote fresh-user config"
+  ! grep -Fq '"statusLine"' "$home/.claude/settings.json" || fail "legacy migration unexpectedly enabled quota telemetry"
+  status="$(HOME="$home" BATON_DATA="$home/.baton" "$REPO/bin/baton" status)"
+  grep -Fq 'quota         disabled' <<<"$status" || fail "legacy migration enabled quota"
+  grep -Fq 'context       enabled' <<<"$status" || fail "legacy migration disabled context"
+  echo "PASS: existing installation migrates context-on and quota-off"
+}
+
 test_both_commands_detected_without_config_dirs
 test_claude_only
 test_codex_only
@@ -321,6 +378,9 @@ test_codex_directory_without_executable
 test_uninstall_both_is_symmetric_and_idempotent
 test_single_agent_uninstall_preserves_shared_commands
 test_uninstall_help_and_invalid_flags
+test_quota_only_flags_install_all_claude_hooks_and_telemetry
+test_existing_statusline_is_preserved_idempotently_and_restored
+test_existing_install_migrates_without_enabling_quota
 
 PATH="$ORIGINAL_PATH"
 echo "All installer integration tests passed."

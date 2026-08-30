@@ -2,14 +2,14 @@
 
 # 🏃 baton-pass
 
-**在上下文喘不过气之前，把接力棒传出去。**
+**在上下文或用量限制打断工作之前，先保存进度并传棒。**
 
 [English](./README.md) | **简体中文**
 
-一个 Stop 钩子 + 技能（skill），它会监控 agent 的上下文体积，当上下文变得
-"昂贵"时，把工作交接给一个*全新*的会话——这样你就不必在每一轮对话里都
-重新发送一份庞大的对话记录、为此持续付费。它是一个零依赖的单文件
-**Go** 二进制——不需要安装 Python、Node 或 `jq`。
+一个本地优先的 agent 连续性工具：上下文守卫、Claude Code 5 小时真实配额守卫
+和手动交接彼此独立，并复用同一套 `baton-pass` skill 与交接格式。它是一个
+零依赖的单文件 **Go** 二进制——不需要 Python、Node、`jq`、后台服务、网络请求
+或 Notchy。
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Built with Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)
@@ -31,7 +31,8 @@ Agent 对话的每一轮都会把**整个上下文**重新发送给模型。
 2. **自动压缩（auto-compaction）会触发。** 接近窗口上限时，你的 agent 会悄悄
    把历史压缩成一份有损的、不是你写的、也无法审阅的摘要。
 
-`baton-pass` 同时解决这两个问题。当你越过阈值时，它会主动提议写一份干净的
+`baton-pass` 同时解决这两个问题，也可以在 Claude Code 的真实 5 小时用量耗尽
+前交接。当任一已启用守卫越过阈值时，它会主动提议写一份干净的
 **交接文档（handoff document）**，并在一个全新会话里重启，只用这份文档作为
 "种子"——把你的上下文从*巨大*重置回*极小*。
 
@@ -65,16 +66,14 @@ Agent 对话的每一轮都会把**整个上下文**重新发送给模型。
 ## ⚙️ 工作原理
 
 ```
-Stop 钩子（每轮结束后）
-  ├─ 读取上下文体积 + 本会话的阈值          （免费——只读对话记录）
-  ├─ 本会话已禁用？               → 什么都不做
-  ├─ 未达到阈值？                 → 什么都不做
-  └─ 超过阈值？ → 一行提示 + 一个原生 ↑/↓ 选择器：
-        1. 立即交接（Handoff now） → 写交接文档，然后：退出 + `batonresume`
-        2. 延长 +10K（Extend）     → 提高本会话的阈值，继续
-        3. 禁用本对话（Disable）   → 本会话不再询问，继续
-        4. 跳过（Skip）            → 继续，下一轮再问
+Claude statusline JSON → Baton 本地 usage.json → Baton 策略引擎
+                                                  ↓
+上下文守卫 / 配额守卫 / 手动请求 → 同一个 baton-pass skill → batonresume
 ```
+
+Claude 配额检查位于 `UserPromptSubmit`、`PreToolUse`、`PostToolUse` 和 `Stop`。
+正常用量时完全静默，不增加任何上下文；缺失、过期、无效或损坏的数据一律放行。
+配额只作用于 Claude，绝不会用陈旧的 Claude 数据阻止 Codex。
 
 选择"立即交接"后：退出会话（/exit），再运行 `batonresume` → 启动一个以交接
 文档作为开场提示的全新会话。Agent（claude / codex）会被自动识别，所以它会
@@ -138,7 +137,14 @@ git clone https://github.com/Rorogogogo/baton-pass && cd baton-pass
 ```sh
 ./install.sh --claude-only
 ./install.sh --codex-only
+
+# 非交互式：只启用 Claude 配额守卫
+./install.sh --claude-only --quota --no-context --quota-threshold 92
 ```
+
+全新交互式安装会询问要监控 5 小时配额、上下文、两者或都不启用。推荐默认是
+配额守卫 92%、上下文守卫关闭。已有安装迁移时保持上下文开启、配额关闭，不会
+在升级后悄悄增加新的自动触发。
 
 安装器会创建以下 agent 专用链接，并把同一个幂等 Stop 命令合并到对应 JSON 钩子文件：
 
@@ -241,7 +247,21 @@ npx skills add Rorogogogo/baton-pass
 
 ## 🔧 配置
 
-通过环境变量设置（在你的 shell 里，或写在钩子命令上）：
+持久配置写在 `<data>/config.json`。常用命令：
+
+```sh
+baton status
+baton config
+baton enable quota
+baton disable quota
+baton enable context
+baton disable context
+baton config quota 92
+baton config context 190000
+```
+
+默认配额级别为：aware 75%、caution 85%、handoff 92%、emergency 96%。
+以下环境变量继续保留以兼容旧安装：
 
 | 变量                    | 默认值      | 含义                                                          |
 | --------------------------- | ------------ | ---------------------------------------------------------------- |
@@ -255,12 +275,14 @@ npx skills add Rorogogogo/baton-pass
 ## 📂 数据布局
 
 ```
-handoffs/<project-name>/handoff-<YYYYMMDD-HHMM>.md   # 每次交接一份，保留历史
-state/<session_id>.json                              # { threshold_override, disabled }
+config.json                                          # 两个独立守卫的持久配置
+usage.json                                           # 仅保存数字配额与重置时间
+handoffs/<project-name>/handoff-<YYYYMMDD-HHMM>.md  # 每次交接一份，保留历史
+state/<session_id>.json                              # 会话覆盖与配额窗口去重状态
 ```
 
 `<project-name>` 是工作目录的 basename，所以不同项目的交接彼此分开、可审计。
-两个文件夹都被 git 忽略——只是本地运行时数据，永不提交。
+这些运行时路径都被 git 忽略，永不提交。
 
 > 本地情况下，`BATON_DATA` 默认指向这个仓库目录，让所有东西都集中在一处。
 > 如果你装到一个只读/受管的位置，请把它指向一个可写目录（例如 `~/.baton-pass`）。
@@ -275,7 +297,10 @@ state/<session_id>.json                              # { threshold_override, dis
 | `baton extend <session_id> <value>` | 提高某个会话的阈值。 |
 | `baton disable <session_id>` | 让 baton-pass 对某个会话保持沉默。 |
 | `baton reset <session_id>` | 清除某个会话的状态。 |
-| `baton check` | Stop 钩子本身（从 stdin 读取钩子负载）；你不需要手动调用它。 |
+| `baton status` | 显示守卫状态与当前 Claude 5 小时用量；不可用时明确显示 unavailable。 |
+| `baton enable/disable context/quota` | 独立启用或关闭两个自动守卫。 |
+| `baton config` | 交互式持久配置。 |
+| `baton check` | 生命周期钩子入口；通常不需要手动调用。 |
 
 ---
 

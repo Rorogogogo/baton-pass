@@ -1,19 +1,7 @@
-// Command baton is the baton-pass runtime: a single dependency-free binary that
-// replaces the former python3 hook and shell+python state helper.
-//
-// Subcommands:
-//
-//	baton check                      Stop hook — reads the hook payload on stdin.
-//	baton extend  <session> <value>  Raise a session's threshold.
-//	baton disable <session>          Silence baton-pass for a session.
-//	baton reset   <session>          Clear a session's state.
-//	baton install-hook   <settings>  Register the Stop hook in Claude settings.json or Codex hooks.json.
-//	baton uninstall-hook <settings>  Remove the Stop hook from Claude settings.json or Codex hooks.json.
+// Command baton is the dependency-free baton-pass runtime.
 package main
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,18 +9,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-func baseThreshold() int { return envInt("BATON_THRESHOLD", 190000) }
-func extendStep() int    { return envInt("BATON_EXTEND_STEP", 10000) }
-
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
-}
 
 func main() {
 	args := os.Args[1:]
@@ -42,11 +18,43 @@ func main() {
 	}
 	switch cmd {
 	case "check":
-		check()
-	case "extend", "disable", "reset":
+		check(args[1:])
+	case "extend", "reset":
 		state(cmd, args[1:])
+	case "disable":
+		if len(args) > 1 && (args[1] == "context" || args[1] == "quota") {
+			setGuard(args[1], false)
+		} else {
+			state(cmd, args[1:])
+		}
+	case "enable":
+		if len(args) != 2 {
+			fatalUsage("usage: baton enable {context|quota}")
+		}
+		setGuard(args[1], true)
+	case "disable-session-quota", "continue-quota":
+		quotaSessionAction(cmd, args[1:])
+	case "status":
+		showStatus()
+	case "is-enabled":
+		if len(args) != 2 {
+			os.Exit(1)
+		}
+		cfg := loadConfig()
+		if (args[1] == "quota" && cfg.Quota.Enabled) || (args[1] == "context" && cfg.Context.Enabled) {
+			return
+		}
+		os.Exit(1)
+	case "config":
+		configure(args[1:])
+	case "init-config":
+		initConfig(args[1:])
+	case "statusline":
+		statusline(args[1:])
 	case "install-hook", "uninstall-hook":
 		hookSettings(cmd, args[1:])
+	case "install-statusline", "uninstall-statusline":
+		statuslineSettings(cmd, args[1:])
 	case "", "-h", "--help", "help":
 		usage()
 	default:
@@ -60,191 +68,38 @@ func usage() {
 	fmt.Fprint(os.Stderr, `baton-pass runtime
 
 usage:
-  baton check                       run the Stop hook (reads JSON payload on stdin)
-  baton extend  <session> <value>   raise a session's threshold
-  baton disable <session>           silence baton-pass for a session
-  baton reset   <session>           clear a session's state
-  baton install-hook   <settings>   register the Stop hook in Claude settings.json or Codex hooks.json
-  baton uninstall-hook <settings>   remove the Stop hook from Claude settings.json or Codex hooks.json
+  baton check [--event EVENT] [--agent AGENT]  run a lifecycle hook (JSON on stdin)
+  baton status                                show guards and Claude quota
+  baton enable  {context|quota}               enable an automatic guard
+  baton disable {context|quota}               disable an automatic guard
+  baton config [context TOKENS|quota PERCENT] configure guards
+  baton extend  <session> <value>             raise a session's context threshold
+  baton disable <session>                     silence all guards for a session
+  baton reset   <session>                     clear a session's state
+  baton install-hook <settings> [agent]       register lifecycle hooks
+  baton uninstall-hook <settings> [agent]     remove lifecycle hooks
 `)
 }
 
-// ---------------------------------------------------------------------------
-// check: the Stop hook
-// ---------------------------------------------------------------------------
-
-type hookInput struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	Cwd            string `json:"cwd"`
-	StopHookActive bool   `json:"stop_hook_active"`
+func fatalUsage(message string) {
+	fmt.Fprintln(os.Stderr, message)
+	os.Exit(1)
 }
 
-type sessionState struct {
-	ThresholdOverride int  `json:"threshold_override,omitempty"`
-	Disabled          bool `json:"disabled,omitempty"`
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
-func check() {
-	var in hookInput
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		os.Exit(0)
-	}
-	// Avoid an infinite block loop: if we're already inside a stop-hook
-	// continuation, don't block again.
-	if in.StopHookActive {
-		os.Exit(0)
-	}
-
-	sessionID := in.SessionID
-	if sessionID == "" {
-		sessionID = "unknown"
-	}
-	cwd := in.Cwd
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	project := filepath.Base(strings.TrimRight(cwd, "/"))
-	if project == "" || project == "." || project == "/" {
-		project = "default"
-	}
-
-	repoRoot := repoRoot()
-	dataDir := repoRoot
+func dataDir() string {
 	if d := os.Getenv("BATON_DATA"); d != "" {
-		dataDir = d
+		return d
 	}
-
-	st := readState(filepath.Join(dataDir, "state", sessionID+".json"))
-	if st.Disabled {
-		os.Exit(0)
-	}
-
-	threshold := baseThreshold()
-	if st.ThresholdOverride > 0 {
-		threshold = st.ThresholdOverride
-	}
-
-	tokens, ok := readContextTokens(in.TranscriptPath)
-	if !ok || tokens < threshold {
-		os.Exit(0)
-	}
-
-	tool := detectTool()
-	instructions := buildInstructions(
-		sessionID,
-		filepath.Join(dataDir, "handoffs", project),
-		resolveCmd("baton", repoRoot),
-		resolveCmd("batonresume", repoRoot),
-		tokens+extendStep(),
-		tool,
-	)
-	notice := fmt.Sprintf("[baton-pass] Context %s ≥ %s — pick how to proceed.",
-		commas(tokens), commas(threshold))
-
-	out := buildHookOutput(tool, notice, instructions)
-	enc := json.NewEncoder(os.Stdout)
-	_ = enc.Encode(out)
-}
-
-func buildHookOutput(tool, notice, instructions string) map[string]any {
-	if tool == "codex" {
-		return map[string]any{
-			"decision": "block",
-			"reason":   notice + "\n\n" + instructions,
-		}
-	}
-	return map[string]any{
-		"decision": "block",
-		"reason":   notice,
-		"hookSpecificOutput": map[string]any{
-			"hookEventName":     "Stop",
-			"additionalContext": instructions,
-		},
-	}
-}
-
-// readContextTokens returns the context size used on the last assistant turn.
-// It understands two transcript formats — Claude Code's JSONL and OpenAI Codex's
-// rollout JSONL — so the same hook fires under either agent.
-func readContextTokens(path string) (int, bool) {
-	if path == "" {
-		return 0, false
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, false
-	}
-	defer f.Close()
-
-	// record captures both transcript shapes; only the fields present on a given
-	// line unmarshal, so we sniff the format per line by which branch is populated.
-	type record struct {
-		// Claude Code / Cursor: one object per message, usage on assistant turns.
-		// input_tokens is the *non-cached* portion, so we add the cache fields.
-		Message struct {
-			Role  string `json:"role"`
-			Usage *struct {
-				InputTokens              int `json:"input_tokens"`
-				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-			} `json:"usage"`
-		} `json:"message"`
-
-		// Codex rollout: token_count events. info.last_token_usage.input_tokens is
-		// the most recent request's full prompt (it *includes* cached_input_tokens),
-		// i.e. the live context-window occupancy — so we use it as-is.
-		Type    string `json:"type"`
-		Payload struct {
-			Type string `json:"type"`
-			Info struct {
-				LastTokenUsage *struct {
-					InputTokens int `json:"input_tokens"`
-				} `json:"last_token_usage"`
-			} `json:"info"`
-		} `json:"payload"`
-	}
-
-	last, found := 0, false
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1024*1024), 64*1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var rec record
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			continue
-		}
-		switch {
-		case rec.Message.Role == "assistant" && rec.Message.Usage != nil:
-			u := rec.Message.Usage
-			last = u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
-			found = true
-		case rec.Type == "event_msg" && rec.Payload.Type == "token_count" && rec.Payload.Info.LastTokenUsage != nil:
-			last = rec.Payload.Info.LastTokenUsage.InputTokens
-			found = true
-		}
-	}
-	return last, found
-}
-
-func buildInstructions(sessionID, handoffDir, batonCmd, resumeCmd string, extendValue int, tool string) string {
-	choicePrompt := "Use the AskUserQuestion tool (the native option picker) to ask how to proceed — do NOT ask in plain text. Offer these four options and act on the choice:"
-	if tool == "codex" {
-		choicePrompt = "Present these four options, ask the user how to proceed, and act on their choice:"
-	}
-	return fmt.Sprintf(
-		"The baton-pass context threshold was reached (current agent: %s). "+
-			"%s\n\n"+
-			"• Handoff now — run the `baton-pass` skill to write the handoff doc under "+
-			"%s/, then tell the user to exit and resume with `%s %s`.\n"+
-			"• Extend +10K — run `%s extend %s %d`, then continue.\n"+
-			"• Disable here — run `%s disable %s`, then continue.\n"+
-			"• Skip — continue; you'll be asked again next turn.",
-		tool, choicePrompt, handoffDir, resumeCmd, tool, batonCmd, sessionID, extendValue, batonCmd, sessionID,
-	)
+	return repoRoot()
 }
 
 func detectTool() string {
@@ -270,9 +125,7 @@ func anyEnvHasPrefix(prefix string) bool {
 	return false
 }
 
-// resolveCmd prefers the bare command name when it's installed on PATH (or in
-// ~/.local/bin); otherwise falls back to the absolute path in the repo's bin/.
-func resolveCmd(name, repoRoot string) string {
+func resolveCmd(name, root string) string {
 	if _, err := exec.LookPath(name); err == nil {
 		return name
 	}
@@ -281,263 +134,9 @@ func resolveCmd(name, repoRoot string) string {
 			return name
 		}
 	}
-	return filepath.Join(repoRoot, "bin", name)
+	return filepath.Join(root, "bin", name)
 }
 
-// ---------------------------------------------------------------------------
-// state: extend / disable / reset
-// ---------------------------------------------------------------------------
-
-func state(action string, args []string) {
-	if len(args) < 1 || args[0] == "" {
-		fmt.Fprintln(os.Stderr, "usage: baton {extend <session> <value>|disable <session>|reset <session>}")
-		os.Exit(1)
-	}
-	session := args[0]
-
-	dataDir := repoRoot()
-	if d := os.Getenv("BATON_DATA"); d != "" {
-		dataDir = d
-	}
-	stateDir := filepath.Join(dataDir, "state")
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "baton: %v\n", err)
-		os.Exit(1)
-	}
-	file := filepath.Join(stateDir, session+".json")
-	st := readState(file)
-
-	switch action {
-	case "extend":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: baton extend <session> <value>")
-			os.Exit(1)
-		}
-		v, err := strconv.Atoi(args[1])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "baton: invalid value %q\n", args[1])
-			os.Exit(1)
-		}
-		st.ThresholdOverride = v
-	case "disable":
-		st.Disabled = true
-	case "reset":
-		st = sessionState{}
-	}
-
-	if err := writeState(file, st); err != nil {
-		fmt.Fprintf(os.Stderr, "baton: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("baton-pass: %s ok (%s)\n", action, file)
-}
-
-func readState(file string) sessionState {
-	var st sessionState
-	b, err := os.ReadFile(file)
-	if err != nil {
-		return st
-	}
-	_ = json.Unmarshal(b, &st)
-	return st
-}
-
-func writeState(file string, st sessionState) error {
-	b, err := json.Marshal(st)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(file, b, 0o644)
-}
-
-// ---------------------------------------------------------------------------
-// install-hook / uninstall-hook: edit a Claude settings.json in place
-// ---------------------------------------------------------------------------
-
-func hookSettings(action string, args []string) {
-	if len(args) < 1 || args[0] == "" {
-		fmt.Fprintf(os.Stderr, "usage: baton %s <settings.json>\n", action)
-		os.Exit(1)
-	}
-	settingsPath := args[0]
-
-	self, err := os.Executable()
-	if err == nil {
-		if resolved, e := filepath.EvalSymlinks(self); e == nil {
-			self = resolved
-		}
-	}
-	// Quote the path: it's run through /bin/sh and may contain spaces.
-	command := fmt.Sprintf("%q check", self)
-
-	var data map[string]any
-	if b, err := os.ReadFile(settingsPath); err == nil {
-		if err := json.Unmarshal(b, &data); err != nil {
-			fmt.Fprintf(os.Stderr, "baton: %s is not valid JSON: %v\n", settingsPath, err)
-			os.Exit(1)
-		}
-	}
-	if data == nil {
-		data = map[string]any{}
-	}
-
-	stop := stopHooks(data)
-	switch action {
-	case "install-hook":
-		if hookPresent(stop) {
-			fmt.Println("  ✓ Stop hook already registered")
-			return
-		}
-		entry := map[string]any{
-			"hooks": []any{map[string]any{"type": "command", "command": command}},
-		}
-		stop = append(stop, entry)
-		setStopHooks(data, stop)
-		backup(settingsPath)
-		writeSettings(settingsPath, data)
-		fmt.Printf("  ✓ Stop hook registered (backup: %s.bak)\n", filepath.Base(settingsPath))
-	case "uninstall-hook":
-		kept, removed := filterBatonHooks(stop)
-		if !removed {
-			fmt.Println("  ✓ no Stop hook entry found")
-			return
-		}
-		setStopHooks(data, kept)
-		backup(settingsPath)
-		writeSettings(settingsPath, data)
-		fmt.Printf("  ✓ removed Stop hook (backup: %s.bak)\n", filepath.Base(settingsPath))
-	}
-}
-
-func stopHooks(data map[string]any) []any {
-	hooks, _ := data["hooks"].(map[string]any)
-	if hooks == nil {
-		return nil
-	}
-	stop, _ := hooks["Stop"].([]any)
-	return stop
-}
-
-func setStopHooks(data map[string]any, stop []any) {
-	hooks, _ := data["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-		data["hooks"] = hooks
-	}
-	hooks["Stop"] = stop
-}
-
-// hookPresent reports whether any registered command references our binary.
-func hookPresent(stop []any) bool {
-	for _, grp := range stop {
-		if groupHasHook(grp) {
-			return true
-		}
-	}
-	return false
-}
-
-func groupHasHook(grp any) bool {
-	g, _ := grp.(map[string]any)
-	if g == nil {
-		return false
-	}
-	hooks, _ := g["hooks"].([]any)
-	for _, h := range hooks {
-		if isBatonHook(h) {
-			return true
-		}
-	}
-	return false
-}
-
-func filterBatonHooks(stop []any) ([]any, bool) {
-	keptGroups := make([]any, 0, len(stop))
-	removed := false
-	for _, grp := range stop {
-		group, ok := grp.(map[string]any)
-		if !ok {
-			keptGroups = append(keptGroups, grp)
-			continue
-		}
-		hooks, ok := group["hooks"].([]any)
-		if !ok {
-			keptGroups = append(keptGroups, grp)
-			continue
-		}
-
-		keptHooks := make([]any, 0, len(hooks))
-		groupChanged := false
-		for _, hook := range hooks {
-			if isBatonHook(hook) {
-				removed = true
-				groupChanged = true
-				continue
-			}
-			keptHooks = append(keptHooks, hook)
-		}
-		if !groupChanged {
-			keptGroups = append(keptGroups, grp)
-			continue
-		}
-		if len(keptHooks) == 0 {
-			continue
-		}
-		keptGroup := make(map[string]any, len(group))
-		for key, value := range group {
-			keptGroup[key] = value
-		}
-		keptGroup["hooks"] = keptHooks
-		keptGroups = append(keptGroups, keptGroup)
-	}
-	return keptGroups, removed
-}
-
-func isBatonHook(hook any) bool {
-	hm, _ := hook.(map[string]any)
-	if hm == nil {
-		return false
-	}
-	cmd, _ := hm["command"].(string)
-	// Strip quotes first so we match whether or not the path was quoted
-	// (quoting is required when the install path contains spaces).
-	cmd = strings.ReplaceAll(cmd, `"`, "")
-	// Match the new Go binary (`baton check` / …/baton) plus legacy installs
-	// (the old `hb` binary and the original python hook) so uninstall migrates.
-	return strings.Contains(cmd, "baton check") ||
-		strings.Contains(cmd, "/baton ") ||
-		strings.Contains(cmd, "handoff_baton_check.py") ||
-		strings.Contains(cmd, "hb check") ||
-		strings.HasSuffix(cmd, "/hb")
-}
-
-func backup(path string) {
-	if b, err := os.ReadFile(path); err == nil {
-		_ = os.WriteFile(path+".bak", b, 0o644)
-	}
-}
-
-func writeSettings(path string, data map[string]any) {
-	if dir := filepath.Dir(path); dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
-	}
-	b, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "baton: %v\n", err)
-		os.Exit(1)
-	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "baton: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-// repoRoot resolves the repository root from the running binary's real path,
-// following symlinks (e.g. ~/.local/bin/baton → <repo>/bin/baton).
 func repoRoot() string {
 	self, err := os.Executable()
 	if err != nil {
@@ -549,10 +148,9 @@ func repoRoot() string {
 	if resolved, e := filepath.EvalSymlinks(self); e == nil {
 		self = resolved
 	}
-	return filepath.Dir(filepath.Dir(self)) // <repo>/bin/baton → <repo>
+	return filepath.Dir(filepath.Dir(self))
 }
 
-// commas formats n with thousands separators (e.g. 190000 → "190,000").
 func commas(n int) string {
 	s := strconv.Itoa(n)
 	neg := strings.HasPrefix(s, "-")
